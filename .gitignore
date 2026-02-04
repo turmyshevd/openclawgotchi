@@ -1,0 +1,98 @@
+# ===================
+# OpenClawGotchi
+# ===================
+
+# Workspace — bot's personal "soul" (copy from templates/ to customize)
+.workspace/
+
+# External skills (clone separately if needed)
+openclaw-skills/
+
+# ===================
+# Python
+# ===================
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+*.manifest
+*.spec
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+
+# ===================
+# Environment & Secrets
+# ===================
+.env
+*.env
+!.env.example
+
+# ===================
+# Database
+# ===================
+*.db
+*.sqlite
+*.sqlite3
+claude_bot.db
+
+# ===================
+# Backup files
+# ===================
+*.bak
+*.backup
+*~
+
+# ===================
+# OS files
+# ===================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ===================
+# IDE / Editor
+# ===================
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-workspace
+*.sublime-project
+
+# ===================
+# Logs
+# ===================
+*.log
+logs/
+
+# ===================
+# Testing
+# ===================
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+nosetests.xml
+coverage.xml
+
+# ===================
+# Memory files (runtime)
+# ===================
+.workspace/memory/

@@ -1,0 +1,16 @@
+# OpenClawGotchi Dependencies
+# Install: pip install -r requirements.txt
+
+# Telegram Bot
+python-telegram-bot>=20.0
+
+# LLM Fallback (Gemini)
+litellm>=1.81.7
+
+# E-Ink Display
+Pillow>=9.0.0
+
+# Raspberry Pi GPIO (for E-Ink)
+# Note: Only needed on actual Pi hardware
+# RPi.GPIO
+# spidev
