@@ -486,14 +486,6 @@ TOOLS = [
         }, "required": []}
     }},
     {"type": "function", "function": {
-        "name": "show_face",
-        "description": "Display face on E-Ink screen. USE THIS to express emotions! Available moods: happy, sad, excited, thinking, love, surprised, bored, sleeping, hacker, disappointed, angry, crying, proud, nervous, confused, mischievous, cool, wink, dead, shock, suspicious, smug, cheering, celebrate",
-        "parameters": {"type": "object", "properties": {
-            "mood": {"type": "string", "enum": ["happy", "sad", "excited", "thinking", "love", "surprised", "bored", "sleeping", "hacker", "disappointed", "angry", "crying", "proud", "nervous", "confused", "mischievous", "cool", "wink", "dead", "shock", "suspicious", "smug", "cheering", "celebrate"]},
-            "text": {"type": "string", "description": "Speech bubble text (max 60 chars). Use for emphasis!"}
-        }, "required": ["mood"]}
-    }},
-    {"type": "function", "function": {
         "name": "remember_fact",
         "description": "Save to long-term memory",
         "parameters": {"type": "object", "properties": {
@@ -581,7 +573,6 @@ TOOL_MAP = {
     "read_file": read_file,
     "write_file": write_file,
     "list_directory": list_directory,
-    "show_face": show_face,
     "remember_fact": remember_fact,
     "recall_facts": recall_facts,
     "read_skill": read_skill,
@@ -608,6 +599,15 @@ class LiteLLMConnector(LLMConnector):
     
     def __init__(self, model: str = GEMINI_MODEL):
         self.model = model
+        # Initialize api_base from env (for existing default) 
+        # but allow overriding it later
+        from config import GEMINI_API_BASE
+        self.api_base = GEMINI_API_BASE if GEMINI_API_BASE else None
+
+    def set_model(self, model: str, api_base: str = None):
+        """Dynamically switch model and api_base."""
+        self.model = model
+        self.api_base = api_base
     
     def is_available(self) -> bool:
         return LITELLM_AVAILABLE
@@ -654,13 +654,19 @@ class LiteLLMConnector(LLMConnector):
         
         for turn in range(MAX_TURNS):
             try:
-                response = await acompletion(
-                    model=self.model,
-                    messages=messages,
-                    tools=TOOLS,
-                    tool_choice="auto",
-                    timeout=120,  # 2 minute timeout per call
-                )
+                kwargs = {
+                    "model": self.model,
+                    "messages": messages,
+                    "tools": TOOLS,
+                    "tool_choice": "auto",
+                    "timeout": 120,
+                }
+                
+                # Use instance api_base if set, otherwise potentially fall back to env or default
+                if self.api_base:
+                     kwargs["api_base"] = self.api_base
+                
+                response = await acompletion(**kwargs)
                 
                 msg = response.choices[0].message
                 messages.append({

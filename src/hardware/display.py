@@ -69,11 +69,17 @@ def parse_and_execute_commands(response: str) -> tuple[str, dict]:
             commands["face"] = mood
             log.info(f"CMD FACE: {mood}")
         
-        # DISPLAY: <text> or DISPLAY: SAY:<text>
+        # DISPLAY: <text>
         elif stripped.upper().startswith("DISPLAY:"):
             text = stripped[8:].strip()
             commands["display"] = text
             log.info(f"CMD DISPLAY: {text}")
+        
+        # SAY: <text> (Direct speech bubble)
+        elif stripped.upper().startswith("SAY:"):
+            text = stripped[4:].strip()
+            commands["display"] = f"SAY:{text}"
+            log.info(f"CMD SAY: {text}")
         
         # DM: <message> — for heartbeat to send private message
         elif stripped.upper().startswith("DM:"):
@@ -107,7 +113,11 @@ def parse_and_execute_commands(response: str) -> tuple[str, dict]:
     
     # Execute batch update if needed
     if commands["face"] or commands["display"]:
-        update_display(mood=commands["face"], text=commands["display"])
+        # Ensure display text has a prefix if it's meant for a bubble
+        disp_text = commands["display"]
+        if disp_text and "SAY:" not in disp_text and "STATUS:" not in disp_text:
+            disp_text = f"SAY:{disp_text}"
+        update_display(mood=commands["face"], text=disp_text)
     
     clean_text = "\n".join(clean_lines)
     return clean_text, commands

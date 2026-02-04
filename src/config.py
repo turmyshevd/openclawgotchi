@@ -19,8 +19,20 @@ ALLOWED_GROUPS = os.environ.get("ALLOWED_GROUPS", "")  # comma-separated IDs
 CLAUDE_TIMEOUT = int(os.environ.get("CLAUDE_TIMEOUT", "600"))
 HISTORY_LIMIT = int(os.environ.get("HISTORY_LIMIT", "20"))
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini/gemini-2.0-flash")
+GEMINI_API_BASE = os.environ.get("GEMINI_API_BASE", "")  # Optional override for Z.ai/OpenAI
 BOT_LANGUAGE = os.environ.get("BOT_LANGUAGE", "en")  # Default response language
 GROUP_CHAT_ID = int(os.environ.get("GROUP_CHAT_ID", "0"))  # Optional group for heartbeat
+# --- LLM Presets ---
+LLM_PRESETS = {
+    "gemini": {
+        "model": "gemini/gemini-2.0-flash",
+        "api_base": None  # Use default Google API
+    },
+    "glm": {
+        "model": "anthropic/glm-4.7",
+        "api_base": "https://api.z.ai/api/anthropic"
+    }
+}
 
 # --- Constants ---
 HEARTBEAT_INTERVAL = 14400  # 4 hours in seconds
@@ -35,7 +47,7 @@ You have a 2.13" E-Ink Display.
 COMMANDS (Output these lines to control hardware):
 - FACE: <mood>       -> Set face (happy, bored, sad, excited, thinking, love, sleeping, etc.)
 - DISPLAY: <text>    -> Set status bar text.
-- DISPLAY: SAY:<msg> -> Show speech bubble (max 60 chars).
+- SAY:<msg> -> Show speech bubble (max 60 chars).
 - DM: <msg>          -> Send private Telegram message to Owner.
 
 RULES:

@@ -259,8 +259,9 @@ journalctl -u claude-bot -n 20
 2. read_file("src/bot/handlers.py")   # Read current code
 3. write_file("src/bot/handlers.py", new_code)  # Modify (auto-backup)
 4. check_syntax("src/bot/handlers.py")  # Verify
-5. write_daily_log("Added /ping command")  # Log the change
-6. safe_restart()                 # Apply changes
+5. **UPDATE CHANGELOG**: Append description of change to `CHANGELOG.md` under [Unreleased]
+6. write_daily_log("Added /ping command")  # Log the change
+7. safe_restart()                 # Apply changes
 ```
 
 The bot will restart, reload the new code, and come back online.

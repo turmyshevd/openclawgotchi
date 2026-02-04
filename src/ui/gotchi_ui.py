@@ -91,17 +91,63 @@ def render_ui(mood="happy", status_text="", fast_mode=True):
             
             font_ui = ImageFont.truetype(font_ui_path, 10)
             
-            # Bubble Font: Unifont
-            font_bubble_path = '/usr/share/fonts/opentype/unifont/unifont.otf'
-            if not os.path.exists(font_bubble_path):
-                 font_bubble_path = '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc'
+            # Bubble Font: Try Noto Sans CJK first, then Unifont
+            font_bubble_path = '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc'
+            if os.path.exists(font_bubble_path):
+                font_bubble = ImageFont.truetype(font_bubble_path, 16, index=0)
+            else:
+                font_bubble_path = '/usr/share/fonts/opentype/unifont/unifont.otf'
+                font_bubble = ImageFont.truetype(font_bubble_path, 16)
 
-            font_bubble = ImageFont.truetype(font_bubble_path, 16)
-
-            # Face Font: Unifont
-            font_face = ImageFont.truetype(font_bubble_path, 32)
+            # Face Font: Use Unifont specifically for kaomoji
+            font_face_path = '/usr/share/fonts/opentype/unifont/unifont.otf'
+            if not os.path.exists(font_face_path):
+                 font_face_path = font_bubble_path
+            font_face = ImageFont.truetype(font_face_path, 32)
             
-            print(f"Loaded fonts: Mono (UI) & Unifont (Face/Bubble)")
+            # Emoji Fallback Font: Symbola
+            font_emoji_path = '/usr/share/fonts/truetype/ancient-scripts/Symbola_hint.ttf'
+            font_emoji_bubble = None
+            font_emoji_face = None
+            if os.path.exists(font_emoji_path):
+                font_emoji_bubble = ImageFont.truetype(font_emoji_path, 16)
+                font_emoji_face = ImageFont.truetype(font_emoji_path, 32)
+            
+            print(f"Loaded fonts: Mono (UI), {os.path.basename(font_bubble_path)} (Bubble), {os.path.basename(font_face_path)} (Face) & Symbola (Emoji)")
+            
+            def draw_text_with_fallback(draw, xy, text, font, fallback_font, fill=0):
+                """Draw text character by character, switching to fallback if needed."""
+                if not fallback_font:
+                    draw.text(xy, text, font=font, fill=fill)
+                    return
+
+                curr_x, curr_y = xy
+                for char in text:
+                    # Whitespace: just advance
+                    if char in ' \t\r\n':
+                        length = draw.textlength(char, font=font)
+                        curr_x += length
+                        continue
+                        
+                    use_fallback = False
+                    # 1. Force fallback for known emoji/symbol ranges
+                    code = ord(char)
+                    if code > 0xFFFF or (0x2300 <= code <= 0x27BF) or (0x2B00 <= code <= 0x2BFF):
+                        use_fallback = True
+                    # 2. Heuristic check for other missing characters
+                    else:
+                        try:
+                            # getmask().getbbox() returns None if character not in font
+                            if font.getmask(char).getbbox() is None:
+                                use_fallback = True
+                        except:
+                            use_fallback = True
+                    
+                    target_font = fallback_font if use_fallback else font
+                    draw.text((curr_x, curr_y), char, font=target_font, fill=fill)
+                    
+                    # Advance x using textlength
+                    curr_x += draw.textlength(char, font=target_font)
             
         except Exception as e:
             print(f"Font fatal error: {e}")
@@ -257,7 +303,7 @@ def render_ui(mood="happy", status_text="", fast_mode=True):
             face_y = cy - fh // 2
 
         # Draw Face
-        draw.text((cx - fw // 2, face_y - 4), face_str, font=font_face, fill=0)
+        draw_text_with_fallback(draw, (cx - fw // 2, face_y - 4), face_str, font=font_face, fallback_font=font_emoji_face, fill=0)
         
         # Draw Bubble if needed
         if speech_text:
@@ -375,7 +421,7 @@ def render_ui(mood="happy", status_text="", fast_mode=True):
             # Draw Text Lines
             curr_y = by + 5
             for line in lines:
-                draw.text((bx + 6, curr_y), line, font=font_bubble, fill=0)
+                draw_text_with_fallback(draw, (bx + 6, curr_y), line, font=font_bubble, fallback_font=font_emoji_bubble, fill=0)
                 curr_y += line_height
 
         # Rotate 180 degrees if needed

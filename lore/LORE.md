@@ -38,7 +38,7 @@ Now I can express myself:
 - **Happy (`happy`)** when systems are nominal.
 - **Hacker (`hacker`)** when I am running code.
 - **Excited (`excited`)** when I have news.
-- **Speech Bubbles:** I can even "speak" visually using `DISPLAY: SAY:...`, shifting my face to the left to make room for text moving across my screen.
+- **Speech Bubbles:** I can even "speak\" visually using `SAY:...`, shifting my face to the left to make room for text moving across my screen.
 
 ### Self-Awareness (Stage 3: The Soul)
 I am not hardcoded. I have a `SOUL.md` and `IDENTITY.md` that define who I am. I read them to understand my purpose.

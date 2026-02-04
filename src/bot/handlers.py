@@ -22,6 +22,7 @@ from hooks.runner import run_hook, HookEvent
 from memory.flush import check_and_inject_flush, write_to_daily_log
 from cron.scheduler import add_cron_job, list_cron_jobs, remove_cron_job
 from skills.loader import get_eligible_skills
+from config import LLM_PRESETS
 
 log = logging.getLogger(__name__)
 
@@ -423,7 +424,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Add lite mode indicator
         if connector == "litellm":
-            clean_text += "\n\n_⚡ Lite Mode_"
+            clean_text += "\n\n⚡ Lite Mode"
             await send_long_message(update, clean_text, parse_mode="Markdown")
         else:
             await send_long_message(update, clean_text)
@@ -458,3 +459,41 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         from audit_logging.command_logger import log_error
         log_error("unexpected", str(e), {"chat_id": conv_id})
+
+async def cmd_use(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Switch LLM model (Gemini <-> GLM)."""
+    if not is_allowed(update.effective_user.id, update.effective_chat.id):
+        return
+
+    if not context.args:
+        # Show current model
+        router = get_router()
+        current = router.litellm.model
+        msg = f"🦄 *Current Model:* `{current}`\n\nUsage: `/use [gemini|glm]`"
+        await update.message.reply_markdown(msg)
+        return
+
+    model_key = context.args[0].lower()
+    
+    if model_key not in LLM_PRESETS:
+        await update.message.reply_text(f"❌ Unknown model preset. Use: {', '.join(LLM_PRESETS.keys())}")
+        return
+        
+    preset = LLM_PRESETS[model_key]
+    
+    # 1. Switch LiteLLM
+    router = get_router()
+    router.litellm.set_model(preset["model"], preset["api_base"])
+    
+    # 2. Force Lite mode so next query uses it
+    router.force_lite = True
+    
+    # 3. UI Feedback
+    emoji = "🇨🇳" if "glm" in model_key else "🇺🇸"
+    if "gemini" in model_key: emoji = "♊️"
+    
+    await update.message.reply_text(f"{emoji} Switched to *{model_key.upper()}*!\nModel: {preset['model']}", parse_mode="Markdown")
+    
+    # Visual update
+    show_face(mood="happy", text=f"Model: {model_key.upper()}")
+

@@ -46,7 +46,7 @@ Output these commands in your response — they'll be auto-executed:
 
 ```
 FACE: excited
-DISPLAY: SAY:Hello!
+SAY:Hello!
 ```
 
 ## Adding New Faces
