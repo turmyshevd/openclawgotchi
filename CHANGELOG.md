@@ -7,7 +7,8 @@ All notable changes to the OpenClawGotchi project will be documented in this fil
 ### Added
 - **XP/Level System**: The E-Ink display footer now shows the bot's current Level and XP (e.g., `Lv1 50XP`).
 - **Mode Indicators**: The E-Ink header now displays `[L]` for Lite mode and `[P]` for Pro mode next to the name.
-- **Emoji & Kaomoji Support**: Added monochrome emoji support for E-Ink using `Symbola` font fallback. Restored `Unifont` for faces and prioritized `NotoSansCJK` for bubbles to ensure all symbols and languages render correctly.
+- **Emoji & Kaomoji Support**: Added monochrome emoji support for E-Ink using `Symbola` font fallback. Restored `Unifont` as the primary font for both faces and bubbles to maintain the bot's signature aesthetic while ensuring full compatibility for complex symbols.
+- **Improved UI Rendering**: Implemented a synchronized fallback engine in `gotchi_ui.py` that ensures consistent text measurement and rendering. This fixes "crooked" bubble alignment issues when using mixed-font strings (e.g., text with emojis).
 - **Dynamic LLM Switching**: New `/use` and `/switch` commands allow switching between providers (Gemini, Z.ai/GLM) without a restart.
 - **Inter-Bot Mail**: Added support for `MAIL:` commands to allow the bot to send and receive messages from its "Senior Brother" (OpenClaw on Mac).
 - **Startup Mail Check**: The bot now checks for and processes pending command emails from the brother immediately upon startup.
