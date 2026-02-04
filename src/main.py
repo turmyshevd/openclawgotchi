@@ -102,6 +102,14 @@ def main():
         scheduler.start()
         log.info(f"Cron scheduler started ({len(scheduler.jobs)} jobs)")
         
+        # Process any pending command mail from brother on startup
+        from bot.heartbeat import get_unread_mail, process_command_mail, send_mail
+        for mail in get_unread_mail():
+            cmd_response = process_command_mail(mail["message"])
+            if cmd_response:
+                send_mail("probro-master", cmd_response)
+                log.info(f"Startup: processed command mail -> {cmd_response[:50]}")
+
         # Show online screen (Start sleeping)
         show_face(mood="sleeping", text="Online (Zzz...)")
         log.info("Bot is running...")

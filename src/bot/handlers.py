@@ -84,38 +84,46 @@ async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /status command."""
+    """Handle /status command — with XP and rate limit info."""
     user = update.effective_user
     chat = update.effective_chat
     
     if not is_allowed(user.id, chat.id):
         return
     
+    from hardware.system import get_stats
+    from db.stats import get_stats_summary
+    from llm.router import get_router
+    from skills.loader import get_eligible_skills
+    from cron.scheduler import list_cron_jobs
+    from hardware.display import show_face
+    
     stats = get_stats()
-    msg_count = get_message_count(chat.id)
+    gotchi_stats = get_stats_summary()
     router = get_router()
-    mode = "Lite ⚡ (Gemini)" if router.force_lite else "Pro 🧠 (Claude)"
+    mode = "Lite ⚡" if router.force_lite else "Pro 🧠"
     
-    # Get skills count
     skills = get_eligible_skills()
-    
-    # Get cron jobs count
     jobs = list_cron_jobs()
     active_jobs = len([j for j in jobs if j.enabled])
     
-    await update.message.reply_text(
-        f"*System Status*\n"
-        f"Uptime: {stats.uptime}\n"
-        f"Temp: {stats.temp}\n"
-        f"Memory: {stats.memory}\n\n"
-        f"*Bot Status*\n"
-        f"Messages: {msg_count}\n"
+    # Build status message
+    msg = (
+        f"🎮 *Lv{gotchi_stats['level']} {gotchi_stats['title']}*\n"
+        f"XP: {gotchi_stats['xp']} | Next: {gotchi_stats['xp_to_next']}\n"
+        f"Days: {gotchi_stats['days_alive']} | Msgs: {gotchi_stats['messages']}\n\n"
+        f"*System*\n"
+        f"⏱ {stats.uptime} | 🌡 {stats.temp}\n"
+        f"💾 {stats.memory}\n\n"
+        f"*Bot*\n"
         f"Mode: {mode}\n"
-        f"Skills: {len(skills)} loaded\n"
-        f"Cron jobs: {active_jobs} active",
-        parse_mode="Markdown"
+        f"Skills: {len(skills)} | Jobs: {active_jobs}"
     )
-
+    
+    # Update display with status
+    show_face("smart", f"SAY:Status check! | STATUS:{mode}")
+    
+    await update.message.reply_text(msg, parse_mode="Markdown")
 
 async def cmd_pro(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /pro command — toggle between Lite and Pro."""
@@ -399,6 +407,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Save response
         save_message(conv_id, "assistant", response)
+        # Award XP for answering
+        from db.stats import on_message_answered
+        on_message_answered()
         
         # Log response
         from audit_logging.command_logger import log_bot_response

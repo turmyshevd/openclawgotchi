@@ -15,13 +15,14 @@ log = logging.getLogger(__name__)
 class LLMRouter:
     """
     Routes requests to available LLM.
-    Falls back from Claude to LiteLLM on rate limits.
+    - Lite mode (default): LiteLLM/Gemini only
+    - Pro mode: Claude only, no fallback (rate limits bubble up)
     """
     
     def __init__(self):
         self.claude = ClaudeConnector()
         self.litellm = LiteLLMConnector()
-        self.force_lite = True  # Manual lite mode toggle (Default: ON)
+        self.force_lite = True  # Default: Lite mode (Gemini)
     
     async def call(
         self, 
@@ -30,37 +31,31 @@ class LLMRouter:
         system_prompt: Optional[str] = None
     ) -> tuple[str, str]:
         """
-        Call LLM with automatic fallback.
+        Call LLM based on current mode.
         
         Returns:
             tuple: (response_text, connector_name)
         """
         
-        # Force lite mode
+        # LITE MODE: LiteLLM only
         if self.force_lite:
             if not self.litellm.is_available():
                 raise LLMError("LiteLLM not available")
             response = await self.litellm.call(prompt, history, system_prompt)
             return response, "litellm"
         
-        # Try Claude first
-        if self.claude.is_available():
-            try:
-                response = await self.claude.call(prompt, history, system_prompt)
-                return response, "claude"
-            except RateLimitError:
-                log.warning("Claude rate limited, falling back to LiteLLM")
+        # PRO MODE: Claude only, no fallback
+        if not self.claude.is_available():
+            raise LLMError("Claude CLI not found. Install it or use /pro for Lite mode.")
         
-        # Fallback to LiteLLM
-        if self.litellm.is_available():
-            response = await self.litellm.call(prompt, history, system_prompt)
-            return response, "litellm"
-        
-        raise LLMError("No LLM available")
+        # Claude call - let RateLimitError bubble up for queueing
+        response = await self.claude.call(prompt, history, system_prompt)
+        return response, "claude"
     
     def toggle_lite_mode(self) -> bool:
-        """Toggle force lite mode. Returns new state."""
+        """Toggle between Lite and Pro mode. Returns new state (True=Lite)."""
         self.force_lite = not self.force_lite
+        log.info(f"Mode switched to: {'Lite' if self.force_lite else 'Pro'}")
         return self.force_lite
     
     @property

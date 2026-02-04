@@ -9,7 +9,7 @@ from pathlib import Path
 PROJECT_DIR = Path(__file__).parent.parent.resolve()
 SRC_DIR = PROJECT_DIR / "src"
 WORKSPACE_DIR = PROJECT_DIR / ".workspace"
-DB_PATH = PROJECT_DIR / "claude_bot.db"
+DB_PATH = PROJECT_DIR / "gotchi.db"
 UI_SCRIPT = SRC_DIR / "ui" / "gotchi_ui.py"
 
 # --- Environment ---

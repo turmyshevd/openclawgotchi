@@ -39,7 +39,7 @@ DANGEROUS_COMMANDS = [
 # Protected files (cannot be written/deleted)
 PROTECTED_FILES = [
     ".env",
-    "claude_bot.db",
+    "gotchi.db",
     "src/drivers/",  # Hardware drivers
 ]
 

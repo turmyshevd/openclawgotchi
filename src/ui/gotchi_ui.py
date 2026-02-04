@@ -12,6 +12,15 @@ from PIL import Image, ImageDraw, ImageFont
 import datetime
 from pathlib import Path
 
+# XP Stats import
+sys.path.insert(0, str(Path(__file__).parent.parent.resolve()))
+try:
+    from db.stats import get_level
+except ImportError:
+    def get_level():
+        return (1, 'Bot', 0, 100)
+
+
 # --- Configuration ---
 # Calculate paths relative to this script: src/ui/gotchi_ui.py
 UI_DIR = Path(__file__).parent.resolve()
@@ -159,8 +168,20 @@ def render_ui(mood="happy", status_text="", fast_mode=True):
         
         if not status_text:
             status_text = "Idle."
-            
-        draw.text((4, HEIGHT - FOOTER_H + 1), status_text[:50], font=font_ui, fill=0)
+        
+        # Get XP for footer
+        try:
+            level, title, xp, _ = get_level()
+            xp_str = f"Lv{level} {xp}XP"
+        except:
+            xp_str = ""
+        
+        # Draw status on left, XP on right
+        draw.text((4, HEIGHT - FOOTER_H + 1), status_text[:35], font=font_ui, fill=0)
+        if xp_str:
+            bbox_xp = draw.textbbox((0, 0), xp_str, font=font_ui)
+            xp_w = bbox_xp[2] - bbox_xp[0]
+            draw.text((WIDTH - xp_w - 4, HEIGHT - FOOTER_H + 1), xp_str, font=font_ui, fill=0)
 
         # 4. Main Content (Face + Bubble)
         
