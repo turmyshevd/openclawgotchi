@@ -87,16 +87,18 @@ def render_ui(mood="happy", status_text="", fast_mode=True):
             # Size 10 is the sweet spot for Full Refresh
             font_ui_path = '/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf'
             if not os.path.exists(font_ui_path):
-                 font_ui_path = '/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf'
+                font_ui_path = '/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf'
             
             font_ui = ImageFont.truetype(font_ui_path, 10)
             
-            # Bubble Font: Try Noto Sans CJK first, then Unifont
-            font_bubble_path = '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc'
-            if os.path.exists(font_bubble_path):
+            # Bubble Font: Try Unifont first (Aesthetic), then Noto
+            font_bubble_path = '/usr/share/fonts/opentype/unifont/unifont.otf'
+            if not os.path.exists(font_bubble_path):
+                 font_bubble_path = '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc'
+            
+            if "noto" in font_bubble_path.lower():
                 font_bubble = ImageFont.truetype(font_bubble_path, 16, index=0)
             else:
-                font_bubble_path = '/usr/share/fonts/opentype/unifont/unifont.otf'
                 font_bubble = ImageFont.truetype(font_bubble_path, 16)
 
             # Face Font: Use Unifont specifically for kaomoji
@@ -115,38 +117,41 @@ def render_ui(mood="happy", status_text="", fast_mode=True):
             
             print(f"Loaded fonts: Mono (UI), {os.path.basename(font_bubble_path)} (Bubble), {os.path.basename(font_face_path)} (Face) & Symbola (Emoji)")
             
+            def get_char_font(char, primary_font, fallback_font):
+                """Determine which font to use for a character."""
+                if not fallback_font:
+                    return primary_font
+                code = ord(char)
+                # Force fallback for known emoji/symbol ranges
+                if code > 0xFFFF or (0x2300 <= code <= 0x27BF) or (0x2B00 <= code <= 0x2BFF):
+                    return fallback_font
+                try:
+                    if primary_font.getmask(char).getbbox() is None:
+                        return fallback_font
+                except:
+                    return fallback_font
+                return primary_font
+
+            def get_text_width(text, font, fallback_font):
+                """Calculate total width of text using fallback logic."""
+                total_w = 0
+                for char in text:
+                    if char in ' \t\r\n':
+                        total_w += draw.textlength(char, font=font)
+                        continue
+                    target_font = get_char_font(char, font, fallback_font)
+                    total_w += draw.textlength(char, font=target_font)
+                return total_w
+
             def draw_text_with_fallback(draw, xy, text, font, fallback_font, fill=0):
                 """Draw text character by character, switching to fallback if needed."""
-                if not fallback_font:
-                    draw.text(xy, text, font=font, fill=fill)
-                    return
-
                 curr_x, curr_y = xy
                 for char in text:
-                    # Whitespace: just advance
                     if char in ' \t\r\n':
-                        length = draw.textlength(char, font=font)
-                        curr_x += length
+                        curr_x += draw.textlength(char, font=font)
                         continue
-                        
-                    use_fallback = False
-                    # 1. Force fallback for known emoji/symbol ranges
-                    code = ord(char)
-                    if code > 0xFFFF or (0x2300 <= code <= 0x27BF) or (0x2B00 <= code <= 0x2BFF):
-                        use_fallback = True
-                    # 2. Heuristic check for other missing characters
-                    else:
-                        try:
-                            # getmask().getbbox() returns None if character not in font
-                            if font.getmask(char).getbbox() is None:
-                                use_fallback = True
-                        except:
-                            use_fallback = True
-                    
-                    target_font = fallback_font if use_fallback else font
+                    target_font = get_char_font(char, font, fallback_font)
                     draw.text((curr_x, curr_y), char, font=target_font, fill=fill)
-                    
-                    # Advance x using textlength
                     curr_x += draw.textlength(char, font=target_font)
             
         except Exception as e:
@@ -279,10 +284,9 @@ def render_ui(mood="happy", status_text="", fast_mode=True):
         }
         face_str = faces.get(mood, faces['happy'])
         
-        # Measure Face
-        bbox_face = draw.textbbox((0, 0), face_str, font=font_face)
-        fw = bbox_face[2] - bbox_face[0]
-        fh = bbox_face[3] - bbox_face[1]
+        # Measure Face (Fallback aware for complex symbols)
+        fw = get_text_width(face_str, font_face, font_emoji_face)
+        fh = 32 # Height is fixed for faces
         
         # Dynamic Positioning
         # Center coordinates (Default)
@@ -308,66 +312,46 @@ def render_ui(mood="happy", status_text="", fast_mode=True):
         # Draw Bubble if needed
         if speech_text:
             # Helper for text wrapping
-            def get_wrapped_text(text, font, max_w):
+            def get_wrapped_text(text, font, fallback_font, max_w):
                 lines = []
-                # Simple check if CJK (contains no spaces but is long?)
-                # Improve: wrap by character if word is too long
-                
-                # Split by space first (for English)
                 words = text.split(' ')
                 curr_line = ""
                 
                 for word in words:
-                    # Test current line + word
                     test_line = (curr_line + " " + word).strip()
-                    bbox = draw.textbbox((0, 0), test_line, font=font)
-                    w = bbox[2] - bbox[0]
+                    w = get_text_width(test_line, font, fallback_font)
                     
                     if w <= max_w:
                         curr_line = test_line
                     else:
-                        # Line full, push current line
                         if curr_line:
                             lines.append(curr_line)
                             curr_line = word
                         else:
-                            # Word itself is too long for one line (or empty prev line)
-                            # Force wrap characters?
-                            # For CJK mixed, we might need character wrapping.
-                            # Basic approach: if word doesn't fit in empty line, split chars
-                             bbox_w = draw.textbbox((0, 0), word, font=font)
-                             if bbox_w[2] - bbox_w[0] > max_w:
-                                 # Split word
-                                 chars = list(word)
-                                 temp_line = ""
-                                 for c in chars:
-                                     test_c = temp_line + c
-                                     bbox_c = draw.textbbox((0, 0), test_c, font=font)
-                                     if bbox_c[2] - bbox_c[0] <= max_w:
-                                         temp_line = test_c
-                                     else:
-                                         lines.append(temp_line)
-                                         temp_line = c
-                                 curr_line = temp_line
-                             else:
-                                 curr_line = word
-                                 
-                if curr_line:
-                    lines.append(curr_line)
+                            # Splitting long words
+                            temp_line = ""
+                            for c in list(word):
+                                test_c = temp_line + c
+                                if get_text_width(test_c, font, fallback_font) <= max_w:
+                                    temp_line = test_c
+                                else:
+                                    lines.append(temp_line)
+                                    temp_line = c
+                            curr_line = temp_line
+                if curr_line: lines.append(curr_line)
                 return lines
             
             # 1. Calculate available width
             start_x = cx + fw // 2 + 5
             max_bubble_width = WIDTH - start_x - 8
             
-            # Wrap text
-            lines = get_wrapped_text(speech_text, font_bubble, max_bubble_width)
+            # Wrap text with fallback awareness
+            lines = get_wrapped_text(speech_text, font_bubble, font_emoji_bubble, max_bubble_width)
             
-            # Calculate Bubble Size
+            # Calculate Bubble Size with fallback awareness
             max_line_w = 0
             for line in lines:
-                bbox = draw.textbbox((0, 0), line, font=font_bubble)
-                w = bbox[2] - bbox[0]
+                w = get_text_width(line, font_bubble, font_emoji_bubble)
                 if w > max_line_w: max_line_w = w
             
             line_height = 18
