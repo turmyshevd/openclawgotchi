@@ -18,6 +18,7 @@ from hardware.system import get_stats
 from llm.router import get_router
 from llm.base import RateLimitError, LLMError
 from bot.telegram import is_allowed, get_sender_name, send_long_message
+from bot.onboarding import needs_onboarding, get_bootstrap_prompt, check_onboarding_complete, complete_onboarding
 from hooks.runner import run_hook, HookEvent
 from memory.flush import check_and_inject_flush, write_to_daily_log
 from memory.summarize import optimize_history
@@ -382,6 +383,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Optimize history for context window
     history = optimize_history(history)
     
+    # Check for onboarding (first-run setup)
+    onboarding_mode = needs_onboarding()
+    if onboarding_mode:
+        bootstrap_prompt = get_bootstrap_prompt()
+        user_text = bootstrap_prompt + " [USER]: " + user_text
+        log.info("Onboarding mode active")
+    
     # Check if memory flush needed
     flush_prompt = check_and_inject_flush(history)
     if flush_prompt:
@@ -420,6 +428,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Award XP for answering
         from db.stats import on_message_answered
         on_message_answered()
+        
+        # Check if onboarding completed
+        if onboarding_mode and check_onboarding_complete(response):
+            complete_onboarding()
+            log.info("Onboarding completed!")
         
         # Log response
         from audit_logging.command_logger import log_bot_response
@@ -506,3 +519,91 @@ async def cmd_use(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Visual update
     show_face(mood="happy", text=f"Model: {model_key.upper()}")
 
+
+async def cmd_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /memory command — show database stats."""
+    user = update.effective_user
+    chat = update.effective_chat
+
+    if not is_allowed(user.id, chat.id):
+        return
+
+    from db.memory import get_message_count, get_all_facts_count
+    from db.stats import get_stats_summary
+    from hardware.system import get_stats
+    import sqlite3
+    from pathlib import Path
+
+    stats = get_stats()
+    gotchi_stats = get_stats_summary()
+    db_path = Path.home() / "openclawgotchi" / "gotchi.db"
+
+    # Count messages
+    conn = sqlite3.connect(str(db_path))
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM messages")
+    msg_count = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM facts")
+    fact_count = cursor.fetchone()[0]
+    cursor.execute("SELECT COUNT(*) FROM bot_mail")
+    mail_count = cursor.fetchone()[0]
+    conn.close()
+
+    # DB size
+    db_size = db_path.stat().st_size if db_path.exists() else 0
+
+    msg = (
+        f"📊 **Memory Dashboard**\n\n"
+        f"**Messages:** {msg_count}\n"
+        f"**Facts:** {fact_count}\n"
+        f"**Mail:** {mail_count}\n"
+        f"**Database:** {db_size // 1024} KB\n\n"
+        f"**System**\n"
+        f"{stats.uptime} | {stats.temp}\n"
+        f"{stats.memory}\n\n"
+        f"**XP:** {gotchi_stats['xp']} (Lv{gotchi_stats['level']})"
+    )
+
+    await update.message.reply_text(msg, parse_mode="Markdown")
+
+
+async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /health command — detailed system health."""
+    user = update.effective_user
+    chat = update.effective_chat
+
+    if not is_allowed(user.id, chat.id):
+        return
+
+    from hardware.system import get_stats
+    from db.stats import get_stats_summary
+    import subprocess
+    from pathlib import Path
+
+    stats = get_stats()
+    gotchi_stats = get_stats_summary()
+
+    # Code stats
+    result = subprocess.run(
+        "find /home/probro/openclawgotchi/src -name '*.py' | wc -l",
+        shell=True, capture_output=True, text=True
+    )
+    py_files = result.stdout.strip() or "unknown"
+
+    msg = (
+        f"🏥 **Health Report**\n\n"
+        f"**System**\n"
+        f"⏱ {stats.uptime}\n"
+        f"🌡 {stats.temp}\n"
+        f"💾 {stats.memory}\n\n"
+        f"**Bot**\n"
+        f"Level {gotchi_stats['level']} {gotchi_stats['title']}\n"
+        f"XP: {gotchi_stats['xp']} | Messages: {gotchi_stats['messages']}\n"
+        f"Days alive: {gotchi_stats['days_alive']}\n\n"
+        f"**Codebase**\n"
+        f"Python files: {py_files}\n\n"
+        f"**Database**\n"
+        f"Size: {(Path.home() / 'openclawgotchi' / 'gotchi.db').stat().st_size // 1024} KB"
+    )
+
+    await update.message.reply_text(msg, parse_mode="Markdown")

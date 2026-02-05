@@ -1,0 +1,19 @@
+{
+  "jobs": [
+    {
+      "id": "heartbeat-hourly",
+      "name": "Hourly Heartbeat",
+      "interval_minutes": 60,
+      "cron_expression": "",
+      "run_at": "",
+      "message": "Read .workspace/HEARTBEAT.md and follow it. Show something on your E-Ink display - a thought, your stats, or just a face. Be alive!",
+      "system_event": "",
+      "enabled": true,
+      "session": "main",
+      "delete_after_run": false,
+      "last_run": "2026-02-05T22:18:21.700974",
+      "next_run": "2026-02-05T23:18:21.700974",
+      "run_count": 8
+    }
+  ]
+}

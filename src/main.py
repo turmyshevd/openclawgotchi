@@ -30,7 +30,7 @@ from db.memory import init_db
 from hardware.display import boot_screen, online_screen, show_face
 from bot.handlers import (
     cmd_start, cmd_clear, cmd_status, cmd_pro, cmd_use,
-    cmd_remember, cmd_recall, cmd_cron, cmd_jobs,
+    cmd_remember, cmd_recall, cmd_cron, cmd_memory, cmd_health, cmd_jobs,
     handle_message
 )
 from bot.heartbeat import send_heartbeat
@@ -47,12 +47,9 @@ log = logging.getLogger(__name__)
 
 
 async def run_cron_job(job):
-    """Callback for cron scheduler."""
-    from bot.heartbeat import send_heartbeat
+    """Callback for cron scheduler — actually execute the job!"""
     log.info(f"Cron job triggered: {job.name}")
     
-    # For now, just log it
-    # In future: could send message via LLM
     from audit_logging.command_logger import log_command
     log_command(
         action=f"cron:{job.name}",
@@ -61,6 +58,35 @@ async def run_cron_job(job):
         source="cron",
         extra={"job_id": job.id, "message": job.message}
     )
+    
+    # Get the application context for sending messages
+    from telegram.ext import Application
+    app = Application.builder().token(BOT_TOKEN).build()
+    
+    # If job has a message, send it to LLM and process response
+    if job.message:
+        from llm.router import get_router
+        from hardware.display import parse_and_execute_commands, show_face
+        
+        router = get_router()
+        
+        # Skip if LLM is busy
+        if router.lock.locked():
+            log.info(f"Skipping cron job {job.name}: LLM busy")
+            return
+        
+        try:
+            async with router.lock:
+                response, connector = await router.call(job.message, [])
+            
+            log.info(f"Cron [{connector}]: {response[:100]}")
+            
+            # Parse and execute hardware commands (FACE:, SAY:, etc)
+            clean_text, commands = parse_and_execute_commands(response)
+            
+        except Exception as e:
+            log.error(f"Cron job {job.name} failed: {e}")
+            show_face("confused", f"Cron error: {str(e)[:30]}")
 
 
 def main():
@@ -142,6 +168,9 @@ def main():
     app.add_handler(CommandHandler("recall", cmd_recall))
     app.add_handler(CommandHandler("cron", cmd_cron))
     app.add_handler(CommandHandler("jobs", cmd_jobs))
+
+    app.add_handler(CommandHandler("memory", cmd_memory))
+    app.add_handler(CommandHandler("health", cmd_health))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
     # Schedule heartbeat

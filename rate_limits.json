@@ -1,0 +1,7 @@
+{
+  "litellm": {
+    "last_hit": "2026-02-05T11:04:36.612190",
+    "retry_seconds": 23.584362417,
+    "error_preview": "litellm.RateLimitError: litellm.RateLimitError: geminiException - {\n  \"error\": {\n    \"code\": 429,\n    \"message\": \"You exceeded your current quota, please check your plan and billing details. For more "
+  }
+}

@@ -69,12 +69,42 @@ def needs_extra_context(user_message: str) -> dict:
     }
 
 
+def format_skills_for_prompt() -> str:
+    """
+    Format active skills for system prompt.
+    Returns skills list or empty string.
+    """
+    try:
+        from skills.loader import get_eligible_skills
+        skills = get_eligible_skills()
+        
+        if not skills:
+            return ""
+        
+        lines = ["## Available Skills"]
+        for skill in skills:
+            name = skill.get("name", "unknown")
+            desc = skill.get("description", "").split("\n")[0][:60]  # First line, truncated
+            lines.append(f"- **{name}**: {desc}")
+        
+        return "\n".join(lines)
+    except Exception:
+        # Silently fail if skills not available
+        return ""
+
+
 def build_system_context(user_message: str = "") -> str:
     """
     Build system context with lazy loading.
     Only includes ARCHITECTURE/TOOLS when query needs them.
+    ALWAYS includes skills (if available).
     """
     parts = [load_bot_instructions()]
+    
+    # CRITICAL FIX: Always include skills in system prompt!
+    skills_text = format_skills_for_prompt()
+    if skills_text:
+        parts.append(f"\n---\n{skills_text}")
     
     # Lazy load based on query
     needs = needs_extra_context(user_message)

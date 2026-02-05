@@ -648,9 +648,13 @@ class LiteLLMConnector(LLMConnector):
         messages.append({"role": "user", "content": prompt})
         
         # Agent loop with safety limits
-        MAX_TURNS = 25
+        MAX_TURNS = 40
         tool_calls_count = 0
         MAX_TOOL_CALLS = 50  # Safety limit
+        
+        # Loop detection
+        recent_tools = []  # Track last N tool calls
+        MAX_REPEAT = 3     # If same tool called 3x in row, summarize
         
         for turn in range(MAX_TURNS):
             try:
@@ -696,6 +700,22 @@ class LiteLLMConnector(LLMConnector):
                             args = {}
                         
                         log.info(f"[LiteLLM] Turn {turn+1}: {func_name}({list(args.keys())})")
+                        
+                        # Loop detection: track recent tools
+                        recent_tools.append(func_name)
+                        if len(recent_tools) > MAX_REPEAT:
+                            recent_tools.pop(0)
+                        
+                        # Check for repetitive pattern
+                        if len(recent_tools) >= MAX_REPEAT and len(set(recent_tools)) == 1:
+                            log.warning(f"[LiteLLM] Loop detected: {func_name} called {MAX_REPEAT}x in a row")
+                            # Ask model to summarize instead of continuing
+                            messages.append({
+                                "role": "user",
+                                "content": "STOP. You're repeating the same action. Summarize what you've found so far and provide your answer with the information you have."
+                            })
+                            recent_tools = []  # Reset
+                            continue  # Skip tool execution, get summary
                         
                         # Execute tool
                         func = TOOL_MAP.get(func_name)
