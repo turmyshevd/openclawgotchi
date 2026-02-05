@@ -2,9 +2,13 @@
 
 All notable changes to the OpenClawGotchi project will be documented in this file.
 
-## [Unreleased] - 2026-02-04
+## [Unreleased] - 2026-02-05
 
 ### Added
+- **Technical Self-Awareness**: The bot now loads `ARCHITECTURE.md` into its system context, giving it knowledge of its own internal structure and hardware integration.
+- **Level-Up Notifications**: Added a hardware callback that triggers a "celebrate" face and E-Ink notification automatically upon reaching a new XP level.
+- **Self-Stats Integration**: System status (provided to LLMs) now includes dynamic Level, Title, and XP data, allowing the bot to refer to its own progression.
+- **Automated Rate Limit Tracking**: Connectors now automatically record 429 errors into `rate_limits.json` for better cross-provider routing.
 - **XP/Level System**: The E-Ink display footer now shows the bot's current Level and XP (e.g., `Lv1 50XP`).
 - **Mode Indicators**: The E-Ink header now displays `[L]` for Lite mode and `[P]` for Pro mode next to the name.
 - **Emoji & Kaomoji Support**: Added monochrome emoji support for E-Ink using `Symbola` font fallback. Restored `Unifont` as the primary font for both faces and bubbles to maintain the bot's signature aesthetic while ensuring full compatibility for complex symbols.
