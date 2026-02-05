@@ -4,22 +4,21 @@ Tracks when we hit 429 and estimates reset times.
 """
 
 import logging
-from datetime import datetime, timedelta
-from typing import Optional
 import json
+import re
+from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Optional
 
 from config import PROJECT_DIR
 
 log = logging.getLogger(__name__)
 
-# Storage file for persistence across restarts
+# Storage file
 LIMITS_FILE = PROJECT_DIR / "rate_limits.json"
 
-# Known reset schedules
-# Gemini free tier: daily quota resets at midnight PT (UTC-8)
-# Claude: shared subscription, ~4h reset cycles
-GEMINI_DAILY_RESET_HOUR_UTC = 8  # Midnight PT = 8:00 UTC
+# Gemini free tier resets at midnight PT (UTC-8)
+GEMINI_DAILY_RESET_HOUR_UTC = 8
 
 _limits_data = {}
 
@@ -50,8 +49,7 @@ def record_rate_limit(provider: str, error_msg: str = ""):
     # Parse retry delay if available
     retry_seconds = None
     if "retry in" in error_msg.lower():
-        import re
-        match = re.search(r"retry in ([\d.]+)s", error_msg.lower())
+        match = re.search(r"retry in ([\d.]+)", error_msg.lower())
         if match:
             retry_seconds = float(match.group(1))
     
@@ -76,14 +74,12 @@ def get_limit_status(provider: str) -> dict:
     last_hit = datetime.fromisoformat(data["last_hit"])
     now = datetime.utcnow()
     
-    # Calculate time since limit
     elapsed = now - last_hit
     elapsed_minutes = int(elapsed.total_seconds() / 60)
     
-    # Estimate reset based on provider
-    if provider == "gemini" or provider == "litellm":
+    if provider in ("gemini", "litellm"):
         # Gemini daily reset at midnight PT
-        next_reset = now.replace(hour=GEMINI_DAILY_RESET_HOUR_UTC, minute=0, second=0)
+        next_reset = now.replace(hour=GEMINI_DAILY_RESET_HOUR_UTC, minute=0, second=0, microsecond=0)
         if now.hour >= GEMINI_DAILY_RESET_HOUR_UTC:
             next_reset += timedelta(days=1)
         
@@ -100,12 +96,12 @@ def get_limit_status(provider: str) -> dict:
         }
     
     elif provider == "claude":
-        # Claude ~4h cycles (rough estimate)
+        # Claude ~4h cycles
         estimated_reset = last_hit + timedelta(hours=4)
         time_to_reset = estimated_reset - now
         
         if time_to_reset.total_seconds() < 0:
-            return {"status": "ok", "message": "Should be reset now"}
+            return {"status": "ok", "message": "Should be reset"}
         
         hours_left = int(time_to_reset.total_seconds() / 3600)
         mins_left = int((time_to_reset.total_seconds() % 3600) / 60)
@@ -121,7 +117,7 @@ def get_limit_status(provider: str) -> dict:
 
 
 def get_all_limits_summary() -> str:
-    """Get a summary of all rate limits for /status."""
+    """Get summary of all rate limits for /status."""
     _load_limits()
     
     if not _limits_data:
@@ -131,7 +127,7 @@ def get_all_limits_summary() -> str:
     for provider in _limits_data:
         status = get_limit_status(provider)
         if status["status"] == "limited":
-            lines.append(f"⏳ {status['provider']}: ~{status['reset_estimate']} left")
+            lines.append(f"⏳ {status.get('provider', provider)}: ~{status['reset_estimate']} left")
         elif status["status"] == "ok":
             lines.append(f"✅ {provider}: OK")
     
@@ -144,3 +140,4 @@ def clear_limit(provider: str):
     if provider in _limits_data:
         del _limits_data[provider]
         _save_limits()
+        log.info(f"Rate limit cleared for {provider}")

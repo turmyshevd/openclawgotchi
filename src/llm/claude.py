@@ -104,6 +104,8 @@ class ClaudeConnector(LLMConnector):
                 
                 if is_limit:
                     log.warning(f"Claude rate limit: {err or 'silent exit'}")
+                    from llm.rate_limits import record_rate_limit
+                    record_rate_limit("claude", err or "silent exit")
                     raise RateLimitError(f"Rate limit: {err or 'silent exit'}")
                 
                 log.error(f"Claude error (exit {proc.returncode}): {err}")

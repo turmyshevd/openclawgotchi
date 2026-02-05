@@ -1,7 +1,7 @@
 """
 Shared prompt loading logic for all LLM connectors.
 
-Single source of truth: BOT_INSTRUCTIONS.md in .workspace/
+Single source of truth: .workspace/ files
 Both Claude CLI and LiteLLM use the same files.
 """
 
@@ -33,19 +33,37 @@ def load_bot_instructions() -> str:
     # Minimal fallback
     return """You are an AI assistant on Raspberry Pi Zero 2W.
 You have a 2.13" E-Ink display. Use show_face(mood, text) or output FACE: <mood> to express emotions.
-Available moods: happy, sad, excited, thinking, love, surprised, bored, sleeping, hacker, disappointed, angry, crying, proud, nervous, confused, mischievous, cool, wink, dead, shock, suspicious, smug, cheering, celebrate.
 Be concise and expressive."""
+
+
+def load_architecture() -> str:
+    """
+    Load ARCHITECTURE.md — technical self-knowledge.
+    This helps any model understand how the bot works internally.
+    """
+    arch_file = WORKSPACE_DIR / "ARCHITECTURE.md"
+    if arch_file.exists():
+        return arch_file.read_text()
+    return ""
 
 
 def build_system_context() -> str:
     """
-    Build full system context: instructions + current stats.
-    Used by all connectors to ensure consistent persona.
+    Build full system context: personality + architecture + stats.
+    Used by all connectors to ensure consistent persona across models.
     """
     instructions = load_bot_instructions()
+    architecture = load_architecture()
     stats = get_stats_string()
     
-    return f"{instructions}\n\n---\n## Current System Status\n{stats}"
+    context = instructions
+    
+    if architecture:
+        context += f"\n\n---\n{architecture}"
+    
+    context += f"\n\n---\n## Current System Status\n{stats}"
+    
+    return context
 
 
 def build_history_prompt(history: list[dict]) -> str:

@@ -2,9 +2,25 @@
 Telegram helpers — auth, message sending.
 """
 
+import re
 from telegram import Update
 
 from config import get_allowed_users, get_allowed_groups, TELEGRAM_MSG_LIMIT
+
+
+def sanitize_markdown(text: str) -> str:
+    """Fix unclosed markdown that breaks Telegram parse."""
+    # Fix unclosed code blocks
+    if text.count("```") % 2 != 0:
+        text += "\n```"
+    # Fix unclosed inline code
+    temp = re.sub(r"```.*?```", "", text, flags=re.DOTALL)
+    if temp.count("`") % 2 != 0:
+        text += "`"
+    # Fix unclosed bold
+    if text.count("**") % 2 != 0:
+        text += "**"
+    return text
 
 
 def is_allowed(user_id: int, chat_id: int = None) -> bool:
@@ -39,6 +55,8 @@ async def send_long_message(
     if not text.strip():
         text = "✅"
     
+    text = sanitize_markdown(text)
+    
     if len(text) <= TELEGRAM_MSG_LIMIT:
         await update.message.reply_text(text, parse_mode=parse_mode)
     else:
@@ -52,6 +70,8 @@ async def send_message(bot, chat_id: int, text: str, parse_mode: str = None):
     """Send message to a specific chat."""
     if not text.strip():
         return
+    
+    text = sanitize_markdown(text)
     
     if len(text) <= TELEGRAM_MSG_LIMIT:
         await bot.send_message(chat_id=chat_id, text=text, parse_mode=parse_mode)

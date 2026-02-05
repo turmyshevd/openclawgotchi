@@ -728,6 +728,10 @@ class LiteLLMConnector(LLMConnector):
                     
             except Exception as e:
                 log.error(f"[LiteLLM] API Error on turn {turn+1}: {e}")
+                # Track rate limit
+                if "429" in str(e) or "RateLimitError" in str(e):
+                    from llm.rate_limits import record_rate_limit
+                    record_rate_limit("litellm", str(e))
                 # Don't crash on API errors, return error message
                 return f"Error: LLM API failed: {str(e)[:200]}"
         

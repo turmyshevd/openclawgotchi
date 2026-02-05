@@ -81,6 +81,15 @@ def get_stats() -> SystemStats:
 
 
 def get_stats_string() -> str:
-    """Get stats as formatted string for prompts."""
+    """Get stats as formatted string for prompts (with self-awareness)."""
     stats = get_stats()
-    return f"[SYSTEM STATS]\nUptime: {stats.uptime}\nTemp: {stats.temp}\nMemory: {stats.memory}"
+    
+    # Add gotchi stats for self-awareness
+    try:
+        from db.stats import get_stats_summary
+        g = get_stats_summary()
+        self_info = f"[SELF] Level {g['level']} {g['title']} | XP: {g['xp']} | Messages: {g['messages']}"
+    except Exception:
+        self_info = "[SELF] Stats loading..."
+    
+    return f"{self_info}\n[SYSTEM] Uptime: {stats.uptime} | Temp: {stats.temp} | RAM: {stats.memory}"

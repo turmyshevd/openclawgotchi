@@ -98,6 +98,7 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from skills.loader import get_eligible_skills
     from cron.scheduler import list_cron_jobs
     from hardware.display import show_face
+    from llm.rate_limits import get_all_limits_summary
     
     stats = get_stats()
     gotchi_stats = get_stats_summary()
@@ -362,6 +363,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Clean mention from text
         user_text = user_text.replace(f"@{bot_username}", "").strip()
+        
+        # Check if anything left after removing mention
+        if not user_text:
+            return  # Nothing to process
     
     save_user(user.id, user.username or "", user.first_name or "", user.last_name or "")
     
