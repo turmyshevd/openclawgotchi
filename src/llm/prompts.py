@@ -14,56 +14,85 @@ from hardware.system import get_stats_string
 def load_bot_instructions() -> str:
     """
     Load BOT_INSTRUCTIONS.md — the main system prompt.
-    
-    Priority:
-    1. .workspace/BOT_INSTRUCTIONS.md (live bot personality)
-    2. templates/BOT_INSTRUCTIONS.md (default)
-    3. Minimal fallback
     """
-    # Try workspace first
     workspace_file = WORKSPACE_DIR / "BOT_INSTRUCTIONS.md"
     if workspace_file.exists():
         return workspace_file.read_text()
     
-    # Fallback to templates
     templates_file = PROJECT_DIR / "templates" / "BOT_INSTRUCTIONS.md"
     if templates_file.exists():
         return templates_file.read_text()
     
-    # Minimal fallback
     return """You are an AI assistant on Raspberry Pi Zero 2W.
-You have a 2.13" E-Ink display. Use show_face(mood, text) or output FACE: <mood> to express emotions.
-Be concise and expressive."""
+Use FACE: <mood> to express emotions. Be concise and expressive."""
 
 
 def load_architecture() -> str:
-    """
-    Load ARCHITECTURE.md — technical self-knowledge.
-    This helps any model understand how the bot works internally.
-    """
+    """Load ARCHITECTURE.md — technical self-knowledge."""
     arch_file = WORKSPACE_DIR / "ARCHITECTURE.md"
     if arch_file.exists():
         return arch_file.read_text()
     return ""
 
 
-def build_system_context() -> str:
+def load_tools() -> str:
+    """Load TOOLS.md — hardware and tool notes."""
+    tools_file = WORKSPACE_DIR / "TOOLS.md"
+    if tools_file.exists():
+        return tools_file.read_text()
+    return ""
+
+
+# Keywords that trigger loading extra context
+ARCHITECTURE_KEYWORDS = [
+    "how do you work", "how are you built", "architecture", "xp", "level",
+    "memory system", "database", "heartbeat", "mail", "brotherhood",
+    "tools", "skills", "technical", "internal", "explain yourself"
+]
+
+TOOLS_KEYWORDS = [
+    "camera", "display", "e-ink", "hardware", "gpio", "sensor",
+    "ssh", "config", "setup"
+]
+
+
+def needs_extra_context(user_message: str) -> dict:
     """
-    Build full system context: personality + architecture + stats.
-    Used by all connectors to ensure consistent persona across models.
+    Detect if query needs extra context files.
+    Returns dict of what to load.
     """
-    instructions = load_bot_instructions()
-    architecture = load_architecture()
-    stats = get_stats_string()
+    msg_lower = user_message.lower()
     
-    context = instructions
+    return {
+        "architecture": any(kw in msg_lower for kw in ARCHITECTURE_KEYWORDS),
+        "tools": any(kw in msg_lower for kw in TOOLS_KEYWORDS)
+    }
+
+
+def build_system_context(user_message: str = "") -> str:
+    """
+    Build system context with lazy loading.
+    Only includes ARCHITECTURE/TOOLS when query needs them.
+    """
+    parts = [load_bot_instructions()]
     
-    if architecture:
-        context += f"\n\n---\n{architecture}"
+    # Lazy load based on query
+    needs = needs_extra_context(user_message)
     
-    context += f"\n\n---\n## Current System Status\n{stats}"
+    if needs["architecture"]:
+        arch = load_architecture()
+        if arch:
+            parts.append(f"\n---\n## Technical Reference\n{arch}")
     
-    return context
+    if needs["tools"]:
+        tools = load_tools()
+        if tools:
+            parts.append(f"\n---\n## Hardware Notes\n{tools}")
+    
+    # Always include current stats (small)
+    parts.append(f"\n---\n## System Status\n{get_stats_string()}")
+    
+    return "\n".join(parts)
 
 
 def build_history_prompt(history: list[dict]) -> str:

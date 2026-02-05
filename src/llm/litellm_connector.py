@@ -612,13 +612,13 @@ class LiteLLMConnector(LLMConnector):
     def is_available(self) -> bool:
         return LITELLM_AVAILABLE
     
-    def _load_system_prompt(self) -> str:
+    def _load_system_prompt(self, user_message: str = "") -> str:
         """
         Load system prompt — same source as Claude CLI.
         Uses shared prompts.py for consistency.
         """
         from llm.prompts import build_system_context
-        return build_system_context()
+        return build_system_context(user_message)
     
     async def call(
         self, 
@@ -637,7 +637,7 @@ class LiteLLMConnector(LLMConnector):
         messages = []
         
         # System prompt (includes stats via build_system_context)
-        sys_content = system_prompt or self._load_system_prompt()
+        sys_content = system_prompt or self._load_system_prompt(prompt)
         messages.append({"role": "system", "content": sys_content})
         
         # History

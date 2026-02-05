@@ -20,6 +20,7 @@ from llm.base import RateLimitError, LLMError
 from bot.telegram import is_allowed, get_sender_name, send_long_message
 from hooks.runner import run_hook, HookEvent
 from memory.flush import check_and_inject_flush, write_to_daily_log
+from memory.summarize import optimize_history
 from cron.scheduler import add_cron_job, list_cron_jobs, remove_cron_job
 from skills.loader import get_eligible_skills
 from config import LLM_PRESETS
@@ -377,6 +378,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     history = get_history(conv_id)
     if history:
         history = history[:-1]
+    
+    # Optimize history for context window
+    history = optimize_history(history)
     
     # Check if memory flush needed
     flush_prompt = check_and_inject_flush(history)

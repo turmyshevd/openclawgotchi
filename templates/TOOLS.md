@@ -1,66 +1,74 @@
-# TOOLS.md — Local Notes
+# TOOLS — Hardware & Capabilities
 
-Skills define _how_ tools work. This file is for _your_ specifics — the stuff that's unique to your setup.
+## Hardware: Raspberry Pi Zero 2W
 
-## What Goes Here
+| Component | Spec |
+|-----------|------|
+| **CPU** | 1GHz quad-core ARM Cortex-A53 (aarch64) |
+| **RAM** | 512MB (~416Mi usable) |
+| **Swap** | 1GB (via dphys-swapfile) |
+| **Storage** | microSD |
+| **WiFi** | 2.4GHz / 5GHz |
+| **LAN IP** | {{LAN_IP}} |
+| **SSH** | Enabled (user: {{SSH_USER}}) |
 
-- Device names and locations
-- SSH hosts and aliases
-- Network addresses
-- Hardware peripherals
-- Environment-specific notes
+## 🖥️ E-Ink Display (MY FACE!)
 
-## Hardware
+**Model:** Waveshare 2.13" E-Ink V4
+- **Resolution:** 250x122 pixels
+- **Colors:** Black and white (1-bit)
+- **Refresh:** ~2-3 seconds
+- **Connection:** GPIO/SPI
 
-| Component | Value |
-|-----------|-------|
-| **Device** | Raspberry Pi Zero 2W |
-| **RAM** | 512MB |
-| **LAN IP** | *(your IP)* |
-| **SSH User** | *(your user)* |
-| **Display** | *(if any)* |
-
-## Peripherals
-
-*(List your connected hardware)*
-
-```markdown
-### Display
-- Type: E-Ink / OLED / None
-- Driver: (if applicable)
-
-### Sensors
-- (list any)
+**Control:**
+```bash
+sudo python3 src/ui/gotchi_ui.py --mood <face> --text "<status>"
 ```
 
-## SSH Hosts
+**Faces:** Defined in `src/ui/gotchi_ui.py` → `faces = {}`
 
-```markdown
-- pi-local → 192.168.x.x, user: probro
-- (add more as needed)
-```
+**Adding faces:** Edit file, add `"name": "(kaomoji)"`, done!
+
+**Style:** Unicode kaomoji with ◕ ‿ ω ♥ ■ ಠ ╭ ╮
+
+## What You CAN Do
+
+- Run shell commands (bash, system tools)
+- Read and write files
+- Check system status (memory, disk, processes)
+- HTTP requests (curl, wget, requests)
+- Manage systemd services
+- Read logs (journalctl)
+- Run Python scripts
+- Access SQLite databases
+- Network diagnostics (ping, ip, ss)
+
+## What You CANNOT Do
+
+- GUI applications (no display server)
+- Heavy computation (limited CPU/RAM)
+- Process large files (>100MB risky)
+- Multiple LLM calls simultaneously
+- GPU acceleration (no GPU)
+- Docker/containers (not enough RAM)
+- Compile large projects
 
 ## Limitations to Remember
 
 - **RAM is precious.** 512MB total. One LLM call at a time.
-- **CPU is slow.** 1GHz ARM. Commands take longer than desktop.
-- **Storage is microSD.** Avoid excessive writes.
+- **CPU is slow.** 1GHz ARM — commands take longer.
+- **I/O is slow.** microSD isn't SSD.
 - **Network is WiFi.** May drop. Handle timeouts.
+- **LLM timeout:** {{TIMEOUT}}s — complex ops may time out.
 
-## What You CAN Do
+## Storage Awareness
 
-- Shell commands, Python scripts
-- Read/write files, SQLite
-- System status, logs, services
-- Network diagnostics
-
-## What You CANNOT Do
-
-- GUI applications
-- Heavy computation (>100MB files)
-- Docker/containers
-- Multiple simultaneous LLM calls
+microSD has limited write endurance:
+- Avoid excessive logging
+- Don't run write-heavy loops
+- Prefer appending over rewriting
+- SQLite is efficient — DB writes are fine
 
 ---
 
-_Add whatever helps you do your job. This is your cheat sheet._
+_Add your specific hardware notes below._
