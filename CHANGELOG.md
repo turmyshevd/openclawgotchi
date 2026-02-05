@@ -2,6 +2,19 @@
 
 All notable changes to the OpenClawGotchi project will be documented in this file.
 
+## [Unreleased] - 2026-02-05
+
+### Added
+- **Functional Cron Jobs**: Scheduled tasks now trigger actual LLM reasoning. When a job fires, the bot can process the message and even trigger hardware commands (FACE, SAY) autonomously.
+- **Onboarding System**: New `onboarding.py` logic and upgraded `BOOTSTRAP.md` template for a guided, personality-driven "first-run" ritual.
+- **Persistent Skill Prompting**: Active skills are now automatically injected into every system prompt to ensure the bot is always aware of its extended capabilities.
+- **Health & Memory Dashboard**: New `/health` and `/memory` commands for real-time monitoring of system vitals, codebase size, and database storage.
+- **Infinite Loop Protection**: Added a safeguard in the LLM router to detect and break redundant tool execution loops.
+
+### Fixed
+- **Rate Limit Resilience**: Improved handling and queuing of messages when Claude is rate-limited.
+- **Tool Logic**: Resolved issues where the bot would repeat search/grep actions instead of providing an answer.
+
 ## [Unreleased] - 2026-02-04
 
 ### Added
