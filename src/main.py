@@ -106,7 +106,7 @@ def main():
     from hardware.display import show_face
     def on_level_up(level, title):
         import time
-        time.sleep(3) # Let the bot response stay on screen for a bit
+        time.sleep(15) # Let the bot response stay on screen for a bit
         show_face("celebrate", f"SAY:LEVEL UP! Lv{level}! | STATUS:{title}")
         log.info(f"Level up notification: Lv{level} {title}")
     set_level_up_callback(on_level_up)
