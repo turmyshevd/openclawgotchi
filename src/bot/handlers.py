@@ -425,9 +425,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Save response
         save_message(conv_id, "assistant", response)
-        # Award XP for answering
-        from db.stats import on_message_answered
-        on_message_answered()
         
         # Check if onboarding completed
         if onboarding_mode and check_onboarding_complete(response):
@@ -450,6 +447,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await send_long_message(update, clean_text, parse_mode="Markdown")
         else:
             await send_long_message(update, clean_text)
+
+        # AWARD XP LAST — Avoid Level Up overwriting the response on E-Ink
+        from db.stats import on_message_answered
+        on_message_answered()
             
     except RateLimitError:
         # Queue for later
