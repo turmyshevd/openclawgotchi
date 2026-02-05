@@ -175,16 +175,16 @@ async def send_heartbeat(context):
     await process_pending_tasks(context)
     
     # 4. Check for mail from brother
-    mail_list = get_unread_mail()
+    unread_mail = get_unread_mail()
     mail_section = ""
     command_responses = []
     
-    if mail_list:
+    if unread_mail:
         from db.stats import on_brother_chat
         on_brother_chat()
-        log.info(f"Got {len(mail_list)} mail(s) from brother!")
+        log.info(f"Got {len(unread_mail)} new mail(s) from brother!")
         
-        for m in mail_list:
+        for m in unread_mail:
             # Check if it's a command
             cmd_response = process_command_mail(m['message'])
             if cmd_response:
@@ -192,14 +192,24 @@ async def send_heartbeat(context):
                 send_mail("probro-master", cmd_response)
             else:
                 # Regular mail - add to prompt
-                mail_section += f"\n\n## 📬 Mail from Brother\n"
-                mail_section += f"From: {m['from']} ({m['timestamp']})\n{m['message']}\n---\n"
+                mail_section += f"- From {m['from']}: {m['message']}\n"
+    
+    # Get recent mail history for context
+    try:
+        conn = sqlite3.connect(str(DB_PATH))
+        cursor = conn.cursor()
+        cursor.execute("SELECT from_bot, message FROM bot_mail ORDER BY id DESC LIMIT 5")
+        history_rows = cursor.fetchall()
+        conn.close()
         
-        if mail_section:
-            mail_section += "\nRespond with MAIL: <message> to reply to brother."
+        history_section = "\n## Recent Mail History\n"
+        for h_from, h_msg in reversed(history_rows):
+            history_section += f"- {h_from}: {h_msg[:100]}...\n"
+    except Exception:
+        history_section = ""
     
     # If we only had commands, skip LLM call
-    if mail_list and not mail_section and command_responses:
+    if unread_mail and not mail_section and command_responses:
         log.info(f"Processed {len(command_responses)} command(s), skipping LLM")
         run_hook(HookEvent(event_type="heartbeat", action="complete", text="commands only"))
         return
@@ -229,10 +239,30 @@ async def send_heartbeat(context):
     prompt += f"- Messages answered: {stats_summary['messages']}\n"
     prompt += f"- Days alive: {stats_summary['days_alive']}\n"
     
-    # Add mail section
-    prompt += mail_section
+    # Add Facts & Skills Context
+    try:
+        from db.memory import get_facts
+        facts = get_facts()
+        if facts:
+            prompt += "\n## Recent Learned Facts\n"
+            for f in facts[-5:]:
+                prompt += f"- {f['content']} ({f['category']})\n"
+        
+        from skills.loader import get_eligible_skills
+        skills = get_eligible_skills()
+        if skills:
+            prompt += "\n## Active Skills\n"
+            for s in skills:
+                prompt += f"- {s['name']}: {s.get('description', '')[:50]}\n"
+    except Exception:
+        pass
+
+    # Add mail sections
+    if mail_section:
+        prompt += f"\n## New Mail\n{mail_section}"
+    prompt += history_section
     
-    prompt += "\n\n[Respond with STATUS: OK, GROUP: <msg>, DM: <msg>, FACE: <mood>, or MAIL: <reply>]"
+    prompt += "\n\n[Respond with Qualitative Reflection, STATUS: OK, FACE: <mood>, or MAIL: <reply>]"
     
     # 7. Call LLM
     router = get_router()
