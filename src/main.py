@@ -63,10 +63,12 @@ async def run_cron_job(job):
     from telegram.ext import Application
     app = Application.builder().token(BOT_TOKEN).build()
     
-    # If job has a message, send it to LLM and process response
-    if job.message:
+    # If job has a message (or name as fallback), send to LLM and send response to owner
+    prompt = (job.message or job.name or "Remind the user.").strip()
+    if prompt:
         from llm.router import get_router
         from hardware.display import parse_and_execute_commands, show_face
+        from config import get_admin_id
         
         router = get_router()
         
@@ -77,12 +79,22 @@ async def run_cron_job(job):
         
         try:
             async with router.lock:
-                response, connector = await router.call(job.message, [])
+                response, connector = await router.call(prompt, [])
             
             log.info(f"Cron [{connector}]: {response[:100]}")
             
             # Parse and execute hardware commands (FACE:, SAY:, etc)
             clean_text, commands = parse_and_execute_commands(response)
+            
+            # Send the response to the owner in Telegram
+            admin_id = get_admin_id()
+            if admin_id and clean_text:
+                from telegram import Bot
+                bot = Bot(token=BOT_TOKEN)
+                await bot.send_message(chat_id=admin_id, text=clean_text[:4000])
+                log.info(f"Cron job {job.name}: sent message to owner")
+            elif not admin_id:
+                log.warning("Cron job: no admin_id, cannot send message")
             
         except Exception as e:
             log.error(f"Cron job {job.name} failed: {e}")
