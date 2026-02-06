@@ -25,11 +25,11 @@ sys.path.insert(0, str(SRC_DIR))
 
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
-from config import BOT_TOKEN, HEARTBEAT_INTERVAL, HEARTBEAT_FIRST_RUN
+from config import BOT_TOKEN, HEARTBEAT_INTERVAL, HEARTBEAT_FIRST_RUN, LEVEL_UP_DISPLAY_DELAY
 from db.memory import init_db
 from hardware.display import boot_screen, online_screen, show_face
 from bot.handlers import (
-    cmd_start, cmd_clear, cmd_status, cmd_pro, cmd_use,
+    cmd_start, cmd_clear, cmd_context, cmd_status, cmd_pro, cmd_use,
     cmd_remember, cmd_recall, cmd_cron, cmd_memory, cmd_health, cmd_jobs,
     handle_message
 )
@@ -89,25 +89,54 @@ async def run_cron_job(job):
             show_face("confused", f"Cron error: {str(e)[:30]}")
 
 
+def ensure_workspace():
+    """Ensure .workspace/ exists — create from templates if needed."""
+    from config import WORKSPACE_DIR, PROJECT_DIR
+    import shutil
+    
+    if WORKSPACE_DIR.exists():
+        return True
+    
+    templates_dir = PROJECT_DIR / "templates"
+    if not templates_dir.exists():
+        log.error("Neither .workspace/ nor templates/ found!")
+        return False
+    
+    log.info("First run: creating .workspace/ from templates/")
+    shutil.copytree(templates_dir, WORKSPACE_DIR)
+    log.info(f"Created {WORKSPACE_DIR}")
+    return True
+
+
 def main():
     """Start the bot."""
     
     # Check token
     if not BOT_TOKEN:
         print("Error: TELEGRAM_BOT_TOKEN not set", file=sys.stderr)
+        print("Copy .env.example to .env and configure it.", file=sys.stderr)
+        sys.exit(1)
+    
+    # Ensure workspace exists (creates from templates on first run)
+    if not ensure_workspace():
+        print("Error: Could not initialize workspace", file=sys.stderr)
         sys.exit(1)
     
     # Initialize database
     init_db()
     log.info("Database initialized")
     
-    # Set up level-up callback
+    # Set up level-up callback (runs in background thread to avoid blocking)
     from db.stats import set_level_up_callback
     from hardware.display import show_face
+    import threading
+    
     def on_level_up(level, title):
-        import time
-        time.sleep(15) # Let the bot response stay on screen for a bit
-        show_face("celebrate", f"SAY:LEVEL UP! Lv{level}! | STATUS:{title}")
+        def delayed_display():
+            import time
+            time.sleep(LEVEL_UP_DISPLAY_DELAY)
+            show_face("celebrate", f"SAY:LEVEL UP! Lv{level}! | STATUS:{title}")
+        threading.Thread(target=delayed_display, daemon=True).start()
         log.info(f"Level up notification: Lv{level} {title}")
     set_level_up_callback(on_level_up)
     
@@ -138,12 +167,12 @@ def main():
         scheduler.start()
         log.info(f"Cron scheduler started ({len(scheduler.jobs)} jobs)")
         
-        # Process any pending command mail from brother on startup
-        from bot.heartbeat import get_unread_mail, process_command_mail, send_mail
+        # Process any pending command mail from sibling on startup
+        from bot.heartbeat import get_unread_mail, process_command_mail, send_mail, SIBLING_BOT
         for mail in get_unread_mail():
             cmd_response = process_command_mail(mail["message"])
-            if cmd_response:
-                send_mail("probro-master", cmd_response)
+            if cmd_response and SIBLING_BOT:
+                send_mail(SIBLING_BOT, cmd_response)
                 log.info(f"Startup: processed command mail -> {cmd_response[:50]}")
 
         # Show online screen (Start sleeping)
@@ -160,6 +189,7 @@ def main():
     # Register handlers
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("clear", cmd_clear))
+    app.add_handler(CommandHandler("context", cmd_context))
     app.add_handler(CommandHandler("status", cmd_status))
     app.add_handler(CommandHandler("pro", cmd_pro))
     app.add_handler(CommandHandler("lite", cmd_pro)) 

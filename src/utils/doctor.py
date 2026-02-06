@@ -11,7 +11,8 @@ def check(name, cmd):
         return False, e.output.strip()
 
 def main():
-    print("=== 🏥 ProBro Doctor ===")
+    bot_name = os.environ.get("BOT_NAME", "Gotchi")
+    print(f"=== 🏥 {bot_name} Doctor ===")
     all_ok = True
 
     # 1. Internet

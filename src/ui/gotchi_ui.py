@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ProBroGotchi UI - Advanced E-Ink Display System
+OpenClawGotchi UI - Advanced E-Ink Display System
 Inspired by Pwnagotchi UI
 """
 
@@ -14,6 +14,13 @@ from pathlib import Path
 
 # XP Stats import
 sys.path.insert(0, str(Path(__file__).parent.parent.resolve()))
+
+# Bot name from config (with fallback)
+try:
+    from config import BOT_NAME
+except ImportError:
+    BOT_NAME = os.environ.get("BOT_NAME", "Gotchi")
+
 try:
     from db.stats import get_level
 except ImportError:
@@ -175,11 +182,11 @@ def render_ui(mood="happy", status_text="", fast_mode=True):
         # For now, let's look for | MODE: ... in status_text if we want it dynamic, 
         # or just parse it from the incoming text.
         
-        display_name = "ProBro"
+        display_name = BOT_NAME
         if "MODE: L" in status_text:
-            display_name = "ProBro [L]"
+            display_name = f"{BOT_NAME} [L]"
         elif "MODE: P" in status_text:
-            display_name = "ProBro [P]"
+            display_name = f"{BOT_NAME} [P]"
             
         draw.text((2, 1), display_name, font=font_ui, fill=0)
         

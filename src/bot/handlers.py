@@ -11,7 +11,7 @@ from telegram.ext import ContextTypes
 from db.memory import (
     save_message, get_history, clear_history, get_message_count,
     save_user, add_fact, search_facts, get_recent_facts,
-    save_pending_task
+    save_pending_task, get_connection
 )
 from hardware.display import parse_and_execute_commands, error_screen, show_face
 from hardware.system import get_stats
@@ -54,14 +54,18 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(
         f"Hi {user.first_name}! I'm your AI assistant on Raspberry Pi.\n\n"
-        f"Commands:\n"
-        f"/clear - clear conversation history\n"
-        f"/status - system status\n"
-        f"/pro - toggle Pro (Claude) mode\n"
-        f"/remember <cat> <fact> - save to memory\n"
-        f"/recall <query> - search memory\n"
-        f"/cron <name> <minutes> <message> - add scheduled task\n"
-        f"/jobs - list scheduled tasks"
+        f"*Commands:*\n"
+        f"/status — system & XP status\n"
+        f"/context — view/trim context window\n"
+        f"/clear — wipe conversation history\n"
+        f"/pro — toggle Lite/Pro mode\n"
+        f"/memory — database stats\n\n"
+        f"*Memory:*\n"
+        f"/remember <cat> <fact> — save fact\n"
+        f"/recall <query> — search memory\n\n"
+        f"*Automation:*\n"
+        f"/cron <name> <min> <msg> — schedule task\n"
+        f"/jobs — list/remove tasks"
     )
 
 
@@ -84,6 +88,81 @@ async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     clear_history(chat.id)
     await update.message.reply_text("History cleared.")
+
+
+async def cmd_context(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /context command — show context window status."""
+    user = update.effective_user
+    chat = update.effective_chat
+    
+    if not is_allowed(user.id, chat.id):
+        return
+    
+    from config import HISTORY_LIMIT
+    
+    msg_count = get_message_count(chat.id)
+    history = get_history(chat.id)
+    
+    # Calculate context usage
+    used_in_context = min(msg_count, HISTORY_LIMIT)
+    usage_pct = int((used_in_context / HISTORY_LIMIT) * 100)
+    
+    # Visual progress bar
+    filled = int(usage_pct / 10)
+    bar = "█" * filled + "░" * (10 - filled)
+    
+    # Estimate tokens (rough: ~4 chars per token)
+    total_chars = sum(len(m.get("content", "")) for m in history)
+    est_tokens = total_chars // 4
+    
+    msg = (
+        f"📊 *Context Window*\n\n"
+        f"Messages in context: {used_in_context}/{HISTORY_LIMIT}\n"
+        f"Usage: [{bar}] {usage_pct}%\n"
+        f"Est. tokens: ~{est_tokens}\n"
+        f"Total in DB: {msg_count}\n\n"
+        f"*Commands:*\n"
+        f"/clear — wipe all history\n"
+        f"/context trim — keep last 3 messages\n"
+        f"/context sum — summarize & save to memory"
+    )
+    
+    # Handle subcommands
+    if context.args:
+        subcmd = context.args[0].lower()
+        if subcmd == "trim":
+            # Keep only last 3 messages
+            conn = get_connection()
+            conn.execute("""
+                DELETE FROM messages WHERE user_id = ? AND id NOT IN (
+                    SELECT id FROM messages WHERE user_id = ? ORDER BY id DESC LIMIT 3
+                )
+            """, (chat.id, chat.id))
+            conn.commit()
+            conn.close()
+            
+            new_count = get_message_count(chat.id)
+            await update.message.reply_text(
+                f"✂️ Trimmed! Kept last 3 messages.\n"
+                f"Before: {msg_count} → After: {new_count}"
+            )
+            return
+        
+        elif subcmd == "summarize" or subcmd == "sum":
+            # Manually trigger LLM summarization
+            await update.message.reply_text("🧠 Summarizing conversation...")
+            
+            from memory.flush import summarize_conversation_with_llm, write_to_daily_log
+            
+            summary = await summarize_conversation_with_llm(history)
+            if summary:
+                write_to_daily_log(f"[Manual Summary]\n{summary}")
+                await update.message.reply_text(f"📝 *Summary saved:*\n\n{summary}", parse_mode="Markdown")
+            else:
+                await update.message.reply_text("No summary needed (not enough messages or already summarized)")
+            return
+    
+    await update.message.reply_text(msg, parse_mode="Markdown")
 
 
 async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -399,9 +478,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Call LLM
     router = get_router()
     
-    # Call LLM
-    router = get_router()
-    
     try:
         # lock handled internally by connector
         log.info(f"[{sender}] -> {user_text[:80]}")
@@ -432,12 +508,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             log.info("Onboarding completed!")
         
         # Log response
-        from audit_logging.command_logger import log_bot_response
-        pass # avoiding circular import issues if any, essentially just ensure logging happens
-        # Actually proper import was above
-        # log_bot_response(conv_id, response, connector) 
-        # Re-adding the import and call correctly as it was in original but unindented
-        
         from audit_logging.command_logger import log_bot_response
         log_bot_response(conv_id, response, connector)
         
@@ -537,7 +607,8 @@ async def cmd_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     stats = get_stats()
     gotchi_stats = get_stats_summary()
-    db_path = Path.home() / "openclawgotchi" / "gotchi.db"
+    from config import DB_PATH
+    db_path = DB_PATH
 
     # Count messages
     conn = sqlite3.connect(str(db_path))
@@ -578,15 +649,15 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     from hardware.system import get_stats
     from db.stats import get_stats_summary
+    from config import SRC_DIR, DB_PATH
     import subprocess
-    from pathlib import Path
 
     stats = get_stats()
     gotchi_stats = get_stats_summary()
 
     # Code stats
     result = subprocess.run(
-        "find /home/probro/openclawgotchi/src -name '*.py' | wc -l",
+        f"find {SRC_DIR} -name '*.py' | wc -l",
         shell=True, capture_output=True, text=True
     )
     py_files = result.stdout.strip() or "unknown"
@@ -604,7 +675,7 @@ async def cmd_health(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"**Codebase**\n"
         f"Python files: {py_files}\n\n"
         f"**Database**\n"
-        f"Size: {(Path.home() / 'openclawgotchi' / 'gotchi.db').stat().st_size // 1024} KB"
+        f"Size: {DB_PATH.stat().st_size // 1024} KB"
     )
 
     await update.message.reply_text(msg, parse_mode="Markdown")

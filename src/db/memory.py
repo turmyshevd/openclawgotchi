@@ -14,6 +14,18 @@ def get_connection():
     return sqlite3.connect(str(DB_PATH))
 
 
+from contextlib import contextmanager
+
+@contextmanager
+def get_db():
+    """Get SQLite connection as context manager (auto-closes)."""
+    conn = sqlite3.connect(str(DB_PATH))
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
 def init_db():
     """Initialize database tables."""
     conn = get_connection()
@@ -68,12 +80,21 @@ def init_db():
 # --- Messages ---
 
 def save_message(user_id: int, role: str, content: str):
-    """Save a message to history."""
+    """Save a message to history, auto-cleanup old messages."""
     conn = get_connection()
     conn.execute(
         "INSERT INTO messages (user_id, role, content, timestamp) VALUES (?, ?, ?, ?)",
         (user_id, role, content, datetime.now().isoformat()),
     )
+    
+    # Auto-cleanup: keep only last 50 messages per chat (5x HISTORY_LIMIT buffer)
+    max_messages = HISTORY_LIMIT * 5
+    conn.execute("""
+        DELETE FROM messages WHERE user_id = ? AND id NOT IN (
+            SELECT id FROM messages WHERE user_id = ? ORDER BY id DESC LIMIT ?
+        )
+    """, (user_id, user_id, max_messages))
+    
     conn.commit()
     conn.close()
 
@@ -161,6 +182,19 @@ def get_recent_facts(limit: int = 10) -> list[dict]:
     ).fetchall()
     conn.close()
     return [{"content": r[0], "category": r[1], "timestamp": r[2]} for r in rows]
+
+
+def get_all_facts_count() -> int:
+    """Get total number of facts."""
+    conn = get_connection()
+    count = conn.execute("SELECT COUNT(*) FROM facts").fetchone()[0]
+    conn.close()
+    return count
+
+
+def get_facts(limit: int = 100) -> list[dict]:
+    """Get all facts (for heartbeat context)."""
+    return get_recent_facts(limit)
 
 
 # --- Pending Tasks ---

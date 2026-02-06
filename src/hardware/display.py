@@ -105,7 +105,6 @@ def parse_and_execute_commands(response: str) -> tuple[str, dict]:
             msg = stripped[5:].strip()
             commands["mail"] = msg
             log.info(f"CMD MAIL: {msg[:50]}...")
-            log.info(f"CMD REMEMBER: {fact}")
 
         # Regular text — keep it
         else:

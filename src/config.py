@@ -22,6 +22,11 @@ GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini/gemini-2.0-flash")
 GEMINI_API_BASE = os.environ.get("GEMINI_API_BASE", "")  # Optional override for Z.ai/OpenAI
 BOT_LANGUAGE = os.environ.get("BOT_LANGUAGE", "en")  # Default response language
 GROUP_CHAT_ID = int(os.environ.get("GROUP_CHAT_ID", "0"))  # Optional group for heartbeat
+
+# --- Bot Identity (customizable via onboarding) ---
+BOT_NAME = os.environ.get("BOT_NAME", "Gotchi")
+OWNER_NAME = os.environ.get("OWNER_NAME", "Owner")
+SIBLING_BOT_NAME = os.environ.get("SIBLING_BOT_NAME", "")  # Optional: name of sibling bot for mail
 # --- LLM Presets ---
 LLM_PRESETS = {
     "gemini": {
@@ -38,6 +43,9 @@ LLM_PRESETS = {
 HEARTBEAT_INTERVAL = 14400  # 4 hours in seconds
 HEARTBEAT_FIRST_RUN = 60    # First heartbeat after 1 minute
 TELEGRAM_MSG_LIMIT = 4096   # Max message length
+LEVEL_UP_DISPLAY_DELAY = 15 # Seconds to wait before showing level-up on E-Ink
+MAX_TOOL_CALLS = 20         # Max tool calls per LLM request
+LLM_TIMEOUT = 120           # Seconds timeout for LLM API calls
 
 # --- System Prompt (fallback, prefer BOT_INSTRUCTIONS.md) ---
 SYSTEM_PROMPT = """

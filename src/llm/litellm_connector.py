@@ -258,21 +258,41 @@ def recall_facts(query: str = "", limit: int = 10) -> str:
 
 
 def read_skill(skill_name: str) -> str:
-    """Read a skill's SKILL.md."""
-    for skills_dir in ["gotchi-skills", "openclaw-skills"]:
-        skill_path = PROJECT_DIR / skills_dir / skill_name / "SKILL.md"
-        if skill_path.exists():
-            return skill_path.read_text()
+    """Read a skill's SKILL.md (works for both gotchi-skills and openclaw-skills)."""
+    from skills.loader import get_skill_content
+    return get_skill_content(skill_name)
+
+
+def search_skills(query: str) -> str:
+    """
+    Search the skill catalog for capabilities.
+    Use this to find skills for tasks you can't do with current tools.
     
-    available = []
-    for skills_dir in ["gotchi-skills", "openclaw-skills"]:
-        sd = PROJECT_DIR / skills_dir
-        if sd.exists():
-            for item in sd.iterdir():
-                if item.is_dir() and (item / "SKILL.md").exists():
-                    available.append(f"{skills_dir}/{item.name}")
+    Example queries: "weather", "email", "notes", "music", "calendar"
+    """
+    from skills.loader import search_skill_catalog
+    return search_skill_catalog(query)
+
+
+def list_skills() -> str:
+    """List all available skill names (both active and reference)."""
+    from skills.loader import list_all_skill_names, get_eligible_skills
     
-    return f"Skill '{skill_name}' not found.\n\nAvailable:\n" + "\n".join(available)
+    active = get_eligible_skills()
+    active_names = {s.name for s in active}
+    all_names = list_all_skill_names()
+    
+    result = ["## Active Skills (loaded in context)"]
+    for s in active:
+        result.append(f"- {s.emoji} {s.name}: {s.description}")
+    
+    result.append("\n## Reference Skills (openclaw-skills/ — may need macOS)")
+    reference = [n for n in all_names if n not in active_names]
+    result.append(f"Total: {len(reference)} skills")
+    result.append("Use search_skills('query') to find specific capabilities.")
+    result.append("Use read_skill('name') to read full documentation.")
+    
+    return "\n".join(result)
 
 
 def restart_self() -> str:
@@ -503,10 +523,22 @@ TOOLS = [
     }},
     {"type": "function", "function": {
         "name": "read_skill",
-        "description": "Read skill documentation. Key skills: 'coding' (project map, self-modification), 'display' (E-Ink faces). Use this to learn how to modify yourself!",
+        "description": "Read skill documentation. Key skills: 'coding' (project map, self-modification), 'display' (E-Ink faces). Also works for openclaw-skills/ reference docs.",
         "parameters": {"type": "object", "properties": {
-            "skill_name": {"type": "string", "description": "Skill name: 'coding', 'display', etc."}
+            "skill_name": {"type": "string", "description": "Skill name: 'coding', 'display', 'weather', 'github', etc."}
         }, "required": ["skill_name"]}
+    }},
+    {"type": "function", "function": {
+        "name": "search_skills",
+        "description": "Search the skill catalog for capabilities. Use this to find skills for tasks you can't do yet. Returns matching skills from openclaw-skills/ (may need macOS).",
+        "parameters": {"type": "object", "properties": {
+            "query": {"type": "string", "description": "Search term: 'weather', 'email', 'calendar', 'music', etc."}
+        }, "required": ["query"]}
+    }},
+    {"type": "function", "function": {
+        "name": "list_skills",
+        "description": "List all available skills — both active (in context) and reference (openclaw-skills/).",
+        "parameters": {"type": "object", "properties": {}}
     }},
     {"type": "function", "function": {
         "name": "write_daily_log",
@@ -576,6 +608,8 @@ TOOL_MAP = {
     "remember_fact": remember_fact,
     "recall_facts": recall_facts,
     "read_skill": read_skill,
+    "search_skills": search_skills,
+    "list_skills": list_skills,
     "write_daily_log": write_daily_log,
     "restart_self": restart_self,
     "check_syntax": check_syntax,

@@ -15,7 +15,7 @@ Start with something like:
 ## What to Ask (2-3 messages max)
 
 **Message 1 — Identity:**
-- What's my name?
+- What's my name? (will be shown on E-Ink display)
 - Who are you? (their name, how to call them)
 - What's your Telegram handle?
 
@@ -25,22 +25,29 @@ Start with something like:
 - Any catchphrases I should use?
 
 **Message 3 — Setup (optional):**
-- How often should I do heartbeats? (show thoughts on screen) — default 60 min
+- Do you have a sibling bot I should know about? (another bot I can mail)
 - Should I be chatty or minimal?
 - Anything else I should know about you?
 
 ## After You Know
 
-Update these files with what you learned:
+**IMPORTANT:** Update these configuration files with what you learned:
 
+### 1. Update .env (for system config)
+Tell the user to update their `.env` file:
+```bash
+# Add these lines to .env:
+BOT_NAME=YourChosenName
+OWNER_NAME=TheirName
+SIBLING_BOT_NAME=sibling-bot  # optional, leave empty if none
+```
+
+### 2. Update workspace files
+Use write_file to update:
 ```
 IDENTITY.md — your name, vibe, emoji, catchphrases
 USER.md — their name, handle, timezone, preferences  
-BOT_INSTRUCTIONS.md — update {{placeholders}}
-HEARTBEAT.md — adjust frequency if they asked
 ```
-
-Use the write_file tool or tell them what to change.
 
 ## Show Your Face!
 
@@ -53,7 +60,7 @@ During onboarding, USE your E-Ink display:
 ## When Done
 
 Tell them:
-> "Awesome! I've saved everything. Deleting my bootstrap script now — I don't need it anymore. I'm me now!"
+> "Awesome! I've saved everything. You may need to restart me for the name change to show on the display. Deleting my bootstrap script now — I don't need it anymore. I'm me now!"
 
 Then delete this file:
 ```

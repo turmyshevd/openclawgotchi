@@ -21,7 +21,9 @@ log = logging.getLogger(__name__)
 
 # Bot mail config
 DB_PATH = PROJECT_DIR / "gotchi.db"
-MY_NAME = "probro-zero"
+# Bot identity — read from env, defaults to generic
+MY_NAME = os.environ.get("BOT_NAME", "gotchi").lower().replace(" ", "-")
+SIBLING_BOT = os.environ.get("SIBLING_BOT_NAME", "")  # Optional sibling for mail
 
 
 def get_unread_mail() -> list[dict]:
@@ -40,7 +42,8 @@ def get_unread_mail() -> list[dict]:
         
         if rows:
             ids = [r[0] for r in rows]
-            conn.execute("UPDATE bot_mail SET read_at=CURRENT_TIMESTAMP WHERE id IN (" + ",".join(map(str, ids)) + ")")
+            placeholders = ",".join("?" * len(ids))
+            conn.execute(f"UPDATE bot_mail SET read_at=CURRENT_TIMESTAMP WHERE id IN ({placeholders})", ids)
             conn.commit()
         
         conn.close()
@@ -52,7 +55,7 @@ def get_unread_mail() -> list[dict]:
 
 
 def send_mail(to_bot: str, message: str) -> bool:
-    """Send mail to another bot (e.g., probro-master)."""
+    """Send mail to another bot (sibling bot)."""
     try:
         conn = sqlite3.connect(str(DB_PATH))
         cursor = conn.cursor()
@@ -174,7 +177,20 @@ async def send_heartbeat(context):
     # 3. Process pending queue
     await process_pending_tasks(context)
     
-    # 4. Check for mail from brother
+    # 4. Summarize recent conversations (LLM)
+    try:
+        from memory.flush import get_chats_with_recent_messages, summarize_and_save
+        recent_chats = get_chats_with_recent_messages()
+        if recent_chats:
+            log.info(f"Summarizing {len(recent_chats)} chat(s) with recent activity")
+            for chat_id in recent_chats[:3]:  # Max 3 chats to avoid overload
+                saved = await summarize_and_save(chat_id)
+                if saved:
+                    log.info(f"Saved summary for chat {chat_id}")
+    except Exception as e:
+        log.warning(f"Conversation summarization failed: {e}")
+    
+    # 5. Check for mail from brother
     unread_mail = get_unread_mail()
     mail_section = ""
     command_responses = []
@@ -189,7 +205,8 @@ async def send_heartbeat(context):
             cmd_response = process_command_mail(m['message'])
             if cmd_response:
                 command_responses.append(cmd_response)
-                send_mail("probro-master", cmd_response)
+                if SIBLING_BOT:
+                    send_mail(SIBLING_BOT, cmd_response)
             else:
                 # Regular mail - add to prompt
                 mail_section += f"- From {m['from']}: {m['message']}\n"
@@ -279,9 +296,9 @@ async def send_heartbeat(context):
         
         clean_text, commands = parse_and_execute_commands(response)
         
-        # Handle MAIL: reply to brother
-        if commands.get("mail"):
-            send_mail("probro-master", commands["mail"])
+        # Handle MAIL: reply to sibling bot
+        if commands.get("mail") and SIBLING_BOT:
+            send_mail(SIBLING_BOT, commands["mail"])
         
         # Send group message
         if commands.get("group"):

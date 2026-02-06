@@ -1,6 +1,8 @@
 """
 Memory Flush — Prompt to save important info before context limit.
 Inspired by OpenClaw's pre-compaction memory flush.
+
+Includes LLM-powered conversation summarization for heartbeat.
 """
 
 import logging
@@ -13,6 +15,9 @@ log = logging.getLogger(__name__)
 
 # Threshold: when history is this % full, suggest memory flush
 FLUSH_THRESHOLD = 0.8  # 80% of HISTORY_LIMIT
+
+# Track last summarized message count to avoid re-summarizing
+_last_summary_msg_count = 0
 
 
 def should_flush(current_messages: int) -> bool:
@@ -87,3 +92,119 @@ def get_recent_daily_logs(days: int = 2) -> str:
             content.append(log_content)
     
     return "\n\n".join(content)
+
+
+# ============================================================
+# LLM SUMMARIZATION (for heartbeat)
+# ============================================================
+
+SUMMARY_PROMPT = """Summarize this conversation in 2-3 bullet points.
+Focus on: key topics discussed, decisions made, important info learned about the user.
+Be very concise (max 100 words total).
+
+Conversation:
+{conversation}
+
+Summary (bullet points only):"""
+
+
+async def summarize_conversation_with_llm(history: list[dict]) -> str | None:
+    """
+    Use LLM to create a brief summary of conversation.
+    Called during heartbeat, not in main message flow.
+    
+    Returns summary string or None if failed/skipped.
+    """
+    global _last_summary_msg_count
+    
+    if not history or len(history) < 3:
+        return None  # Not enough to summarize
+    
+    # Skip if we already summarized this
+    if len(history) <= _last_summary_msg_count:
+        log.debug("Skipping summary — no new messages since last")
+        return None
+    
+    # Format conversation for summarization
+    conv_text = []
+    for msg in history[-10:]:  # Last 10 messages max
+        role = "User" if msg.get("role") == "user" else "Bot"
+        content = msg.get("content", "")[:200]  # Truncate long messages
+        # Skip display commands
+        if content.strip().upper().startswith(("FACE:", "DISPLAY:", "SAY:")):
+            continue
+        conv_text.append(f"{role}: {content}")
+    
+    if len(conv_text) < 2:
+        return None
+    
+    conversation = "\n".join(conv_text)
+    prompt = SUMMARY_PROMPT.format(conversation=conversation)
+    
+    try:
+        # Use LiteLLM for summarization (fast, cheap)
+        from litellm import acompletion
+        from config import GEMINI_MODEL
+        
+        response = await acompletion(
+            model=GEMINI_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=150,
+            temperature=0.3,  # Low temp for factual summary
+        )
+        
+        summary = response.choices[0].message.content.strip()
+        
+        # Update tracking
+        _last_summary_msg_count = len(history)
+        
+        log.info(f"LLM summary generated: {summary[:50]}...")
+        return summary
+        
+    except Exception as e:
+        log.warning(f"LLM summarization failed: {e}")
+        return None
+
+
+async def summarize_and_save(chat_id: int) -> bool:
+    """
+    Summarize recent conversation and save to daily log.
+    Call this from heartbeat.
+    
+    Returns True if summary was saved.
+    """
+    from db.memory import get_history
+    
+    history = get_history(chat_id)
+    if not history:
+        return False
+    
+    summary = await summarize_conversation_with_llm(history)
+    if not summary:
+        return False
+    
+    # Save to daily log
+    write_to_daily_log(f"[Conversation Summary]\n{summary}")
+    
+    return True
+
+
+def get_chats_with_recent_messages() -> list[int]:
+    """Get chat IDs that had messages since last heartbeat."""
+    from db.memory import get_connection
+    from datetime import timedelta
+    
+    # Messages in last 4 hours (heartbeat interval)
+    cutoff = (datetime.now() - timedelta(hours=4)).isoformat()
+    
+    try:
+        conn = get_connection()
+        rows = conn.execute(
+            "SELECT DISTINCT user_id FROM messages WHERE timestamp > ? LIMIT 10",
+            (cutoff,)
+        ).fetchall()
+        conn.close()
+        return [r[0] for r in rows]
+    except Exception as e:
+        log.warning(f"Failed to get recent chats: {e}")
+        return []

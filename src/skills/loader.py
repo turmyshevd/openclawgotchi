@@ -197,10 +197,11 @@ def load_all_skills() -> list[Skill]:
     import os
 
     # Skills that are always loaded (essential for bot operation)
-    CORE_SKILLS = ["coding", "display"]
+    # gotchi-skills take precedence over openclaw-skills with same name
+    CORE_SKILLS = ["coding", "display", "weather", "system", "discord"]
     
-    # Get active skills from env or use defaults
-    active_env = os.environ.get("ACTIVE_SKILLS", "weather,local-places,memory,summarize")
+    # Get additional active skills from env (optional)
+    active_env = os.environ.get("ACTIVE_SKILLS", "")
     active_skills = CORE_SKILLS + [s.strip() for s in active_env.split(",") if s.strip()]
     
     skills = []
@@ -249,3 +250,98 @@ def format_skills_for_prompt(skills: list[Skill] = None) -> str:
     lines.append("Read SKILL.md before using a skill.")
     
     return "\n".join(lines)
+
+
+# ============================================================
+# SKILL CATALOG (Passive Knowledge)
+# ============================================================
+
+def get_skill_catalog() -> str:
+    """
+    Get the full skill catalog from openclaw-skills/CATALOG.md.
+    This is "passive knowledge" — bot doesn't load these, but can search them.
+    """
+    catalog_path = PROJECT_DIR / "openclaw-skills" / "CATALOG.md"
+    if catalog_path.exists():
+        return catalog_path.read_text(encoding='utf-8')
+    return ""
+
+
+def search_skill_catalog(query: str) -> str:
+    """
+    Search the skill catalog for relevant skills.
+    Returns matching entries from CATALOG.md.
+    
+    Args:
+        query: Search term (skill name, keyword, or capability)
+    
+    Returns:
+        Matching skill descriptions, or suggestion to check catalog
+    """
+    catalog = get_skill_catalog()
+    if not catalog:
+        return "Skill catalog not found (openclaw-skills/CATALOG.md)"
+    
+    query_lower = query.lower()
+    lines = catalog.strip().split('\n')
+    
+    matches = []
+    for line in lines:
+        if line.startswith('-') and query_lower in line.lower():
+            matches.append(line)
+    
+    if not matches:
+        # Fuzzy search: check individual words
+        query_words = query_lower.split()
+        for line in lines:
+            if line.startswith('-'):
+                line_lower = line.lower()
+                if any(word in line_lower for word in query_words):
+                    matches.append(line)
+    
+    if matches:
+        result = f"Found {len(matches)} skill(s) matching '{query}':\n\n"
+        result += "\n".join(matches[:10])  # Max 10 results
+        if len(matches) > 10:
+            result += f"\n\n... and {len(matches) - 10} more."
+        result += "\n\n⚠️ Note: These skills are from openclaw-skills/ and may require macOS or specific tools. Check SKILL.md for requirements."
+        return result
+    
+    return f"No skills found matching '{query}'. Try broader terms or check openclaw-skills/CATALOG.md directly."
+
+
+def get_skill_content(skill_name: str) -> str:
+    """
+    Read the full content of a skill's SKILL.md.
+    Works for both gotchi-skills and openclaw-skills.
+    """
+    for skills_dir in SKILLS_DIRS:
+        skill_path = skills_dir / skill_name / "SKILL.md"
+        if skill_path.exists():
+            content = skill_path.read_text(encoding='utf-8')
+            
+            # Add compatibility warning for openclaw-skills
+            if "openclaw-skills" in str(skills_dir):
+                warning = (
+                    "\n\n---\n"
+                    "⚠️ **COMPATIBILITY WARNING**: This skill is from openclaw-skills/ "
+                    "and may not work on Raspberry Pi. Check requirements above.\n"
+                    "---\n"
+                )
+                return content + warning
+            
+            return content
+    
+    return f"Skill '{skill_name}' not found. Use search_skills() to find available skills."
+
+
+def list_all_skill_names() -> list[str]:
+    """List all available skill names (for autocomplete/discovery)."""
+    names = []
+    for skills_dir in SKILLS_DIRS:
+        if not skills_dir.exists():
+            continue
+        for item in skills_dir.iterdir():
+            if item.is_dir() and (item / "SKILL.md").exists():
+                names.append(item.name)
+    return sorted(set(names))

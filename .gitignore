@@ -96,3 +96,19 @@ coverage.xml
 # Memory files (runtime)
 # ===================
 .workspace/memory/
+
+# ===================
+# Runtime data
+# ===================
+rate_limits.json
+data/cron_jobs.json
+
+# ===================
+# Personal/internal files (not for public repo)
+# ===================
+README_HANDOVER.md
+sync.sh
+refresh_remote_token.sh
+
+# Personal commands
+.claude/commands/
