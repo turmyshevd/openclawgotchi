@@ -92,4 +92,10 @@ def get_stats_string() -> str:
     except Exception:
         self_info = "[SELF] Stats loading..."
     
-    return f"{self_info}\n[SYSTEM] Uptime: {stats.uptime} | Temp: {stats.temp} | RAM: {stats.memory}"
+    try:
+        from config import PROJECT_DIR, DB_PATH
+        paths_info = f"[PATHS] Project: {PROJECT_DIR} | DB: {DB_PATH}"
+    except Exception:
+        paths_info = ""
+    
+    return f"{self_info}\n[SYSTEM] Uptime: {stats.uptime} | Temp: {stats.temp} | RAM: {stats.memory}\n{paths_info}"

@@ -82,12 +82,14 @@ def load_hooks_from_file(hook_file: Path) -> int:
             hook_file
         )
         if spec and spec.loader:
+            before = sum(len(handlers) for handlers in _hooks.values())
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
             
-            # Count hooks that were registered
-            count = sum(len(handlers) for handlers in _hooks.values())
-            log.info(f"Loaded hooks from {hook_file.name}")
+            # Count only hooks added by this file
+            after = sum(len(handlers) for handlers in _hooks.values())
+            count = after - before
+            log.info(f"Loaded {count} hook(s) from {hook_file.name}")
             return count
     except Exception as e:
         log.error(f"Failed to load hooks from {hook_file}: {e}")

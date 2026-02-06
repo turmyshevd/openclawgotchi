@@ -11,6 +11,8 @@ SRC_DIR = PROJECT_DIR / "src"
 WORKSPACE_DIR = PROJECT_DIR / ".workspace"
 DB_PATH = PROJECT_DIR / "gotchi.db"
 UI_SCRIPT = SRC_DIR / "ui" / "gotchi_ui.py"
+DATA_DIR = PROJECT_DIR / "data"
+CUSTOM_FACES_PATH = DATA_DIR / "custom_faces.json"
 
 # --- Environment ---
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
@@ -27,7 +29,10 @@ GROUP_CHAT_ID = int(os.environ.get("GROUP_CHAT_ID", "0"))  # Optional group for 
 BOT_NAME = os.environ.get("BOT_NAME", "Gotchi")
 OWNER_NAME = os.environ.get("OWNER_NAME", "Owner")
 SIBLING_BOT_NAME = os.environ.get("SIBLING_BOT_NAME", "")  # Optional: name of sibling bot for mail
-# --- LLM Presets ---
+# --- LLM Presets (Lite mode) ---
+# Default preset for LiteLLM when no key is set — "glm" (Z.ai) or "gemini"
+DEFAULT_LITE_PRESET = os.environ.get("DEFAULT_LITE_PRESET", "glm")
+
 LLM_PRESETS = {
     "gemini": {
         "model": "gemini/gemini-2.0-flash",
@@ -46,6 +51,8 @@ TELEGRAM_MSG_LIMIT = 4096   # Max message length
 LEVEL_UP_DISPLAY_DELAY = 15 # Seconds to wait before showing level-up on E-Ink
 MAX_TOOL_CALLS = 20         # Max tool calls per LLM request
 LLM_TIMEOUT = 120           # Seconds timeout for LLM API calls
+# Model context window (tokens). Used for /context "how full is the model's window"
+MODEL_CONTEXT_TOKENS = int(os.environ.get("MODEL_CONTEXT_TOKENS", "128000"))
 
 # --- System Prompt (fallback, prefer BOT_INSTRUCTIONS.md) ---
 SYSTEM_PROMPT = """

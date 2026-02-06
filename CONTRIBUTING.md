@@ -9,7 +9,7 @@ Thank you for your interest in contributing! 🤖
 3. Create a branch for your feature
 
 ```bash
-git clone https://github.com/yourusername/openclawgotchi
+git clone https://github.com/<your-username>/openclawgotchi
 cd openclawgotchi
 git checkout -b feature/my-feature
 ```

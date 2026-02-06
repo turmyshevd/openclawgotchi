@@ -3,6 +3,7 @@ Heartbeat — periodic tasks, auto-mood, XP, bot_mail, reflection.
 """
 
 import logging
+import os
 import sqlite3
 from pathlib import Path
 
@@ -239,10 +240,25 @@ async def send_heartbeat(context):
     
     template = hb_path.read_text()
     
-    # 6. Inject stats
+    # 6. Load SOUL + IDENTITY for self-awareness during reflection
+    soul_parts = []
+    soul_path = WORKSPACE_DIR / "SOUL.md"
+    if soul_path.exists():
+        soul_parts.append(soul_path.read_text())
+    identity_path = WORKSPACE_DIR / "IDENTITY.md"
+    if identity_path.exists():
+        soul_parts.append(identity_path.read_text())
+    
+    # 7. Inject stats
     stats = get_stats()
     stats_summary = get_stats_summary()
-    prompt = (
+    prompt = ""
+    
+    # Add soul/identity context first
+    if soul_parts:
+        prompt += "\n".join(soul_parts) + "\n\n---\n\n"
+    
+    prompt += (
         template
         .replace("{{uptime}}", stats.uptime)
         .replace("{{temp}}", stats.temp)
@@ -270,9 +286,27 @@ async def send_heartbeat(context):
         if skills:
             prompt += "\n## Active Skills\n"
             for s in skills:
-                prompt += f"- {s['name']}: {s.get('description', '')[:50]}\n"
+                prompt += f"- {s.name}: {(s.description or '')[:50]}\n"
     except Exception:
         pass
+    
+    # Add recent daily log (conversation summaries from today)
+    try:
+        from memory.flush import get_recent_daily_logs
+        daily = get_recent_daily_logs(days=1)
+        if daily and len(daily.strip()) > 20:
+            # Truncate if too long
+            if len(daily) > 600:
+                daily = daily[:600] + "\n... (truncated)"
+            prompt += f"\n## Today's Activity Log\n{daily}\n"
+    except Exception:
+        pass
+    
+    # Remind bot it can evolve
+    prompt += (
+        "\n\n💡 You can update your SOUL.md and IDENTITY.md with write_file() "
+        "if you feel your personality or self-description has evolved."
+    )
 
     # Add mail sections
     if mail_section:
@@ -295,6 +329,14 @@ async def send_heartbeat(context):
         log.info(f"Heartbeat [{connector}]: {response[:100]}")
         
         clean_text, commands = parse_and_execute_commands(response)
+        
+        # Save reflection to daily log (always, even if no commands)
+        if clean_text:
+            try:
+                from memory.flush import write_to_daily_log
+                write_to_daily_log(f"[Heartbeat Reflection] {clean_text[:300]}")
+            except Exception as e:
+                log.warning(f"Failed to save reflection: {e}")
         
         # Handle MAIL: reply to sibling bot
         if commands.get("mail") and SIBLING_BOT:

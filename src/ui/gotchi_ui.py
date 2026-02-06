@@ -8,6 +8,7 @@ import sys
 import os
 import subprocess
 import time
+import json
 from PIL import Image, ImageDraw, ImageFont
 import datetime
 from pathlib import Path
@@ -22,10 +23,10 @@ except ImportError:
     BOT_NAME = os.environ.get("BOT_NAME", "Gotchi")
 
 try:
-    from db.stats import get_level
+    from db.stats import get_level_progress
 except ImportError:
-    def get_level():
-        return (1, 'Bot', 0, 100)
+    def get_level_progress():
+        return {"level": 1, "title": "Bot", "xp": 0, "xp_in_level": 0, "xp_needed_this_level": 100, "max_level": 20}
 
 
 # --- Configuration ---
@@ -69,6 +70,71 @@ def get_system_stats():
         return {'load': 0, 'temp': '?', 'mem_avail': '?', 'mem_total': '?', 'uptime': '?'}
         
     return stats
+
+
+def _load_all_faces() -> dict:
+    """
+    Load all faces: default + custom (from data/custom_faces.json).
+    Custom faces override defaults if name matches.
+    """
+    # Default faces (THE SINGLE SOURCE OF TRUTH)
+    default_faces = {
+        # === BASIC EMOTIONS ===
+        "happy":        "(◕‿◕)",
+        "happy2":       "(•‿‿•)",
+        "sad":          "(╥☁╥ )",
+        "excited":      "(ᵔ◡◡ᵔ)",
+        "thinking":     "(￣ω￣)",
+        "love":         "(♥‿‿♥)",
+        "surprised":    "(◉_◉)",
+        "grateful":     "(^‿‿^)",
+        "motivated":    "(☼‿‿☼)",
+        
+        # === STATES ===
+        "bored":        "(-__-)",
+        "sleeping":     "( -_-)zZ",
+        "sleeping_pwn": "(⇀‿‿↼)", # Pwnagotchi style
+        "awakening":    "(≖‿‿≖)",
+        "observing":    "( ⚆⚆)",
+        "intense":      "(°▃▃°)",
+        "cool":         "(⌐■_■)",
+        "hacker":       "[■_■]",
+        "smart":        "(✜‿‿✜)",
+        "broken":       "(☓‿‿☓)",
+        "debug":        "(#__#)",
+        
+        # === EXTENDED ===
+        "angry":        "(╬ಠ益ಠ)",
+        "crying":       "(ಥ﹏ಥ)",
+        "proud":        "(๑•̀ᴗ•́)و",
+        "nervous":      "(°△°;)",
+        "confused":     "(◎_◎;)",
+        "mischievous":  "(◕‿↼)",
+        "wink":         "(◕‿◕✿)",
+        "dead":         "(✖_✖)",
+        "shock":        "(◯△◯)",
+        "suspicious":   "(¬_¬)",
+        "smug":         "(￣ω￣)",
+        "cheering":     "\\(◕◡◕)/",
+        "celebrate":    "★(◕‿◕)★",
+        "dizzy":        "(@_@)",
+        "lonely":       "(ب__ب)",
+        "demotivated":  "(≖__≖)",
+    }
+    
+    # Load custom faces from JSON
+    custom_faces = {}
+    try:
+        from config import CUSTOM_FACES_PATH
+        if CUSTOM_FACES_PATH.exists():
+            custom_faces = json.loads(CUSTOM_FACES_PATH.read_text())
+    except Exception:
+        pass  # If file doesn't exist or invalid, just use defaults
+    
+    # Merge: custom override defaults
+    faces = {**default_faces, **custom_faces}
+    return faces
+
 
 def render_ui(mood="happy", status_text="", fast_mode=True):
     """Render the UI."""
@@ -227,11 +293,14 @@ def render_ui(mood="happy", status_text="", fast_mode=True):
         if not status_text:
             status_text = "Idle."
         
-        # Get XP for footer
+        # Get XP for footer (RPG progress: current/needed or MAX)
         try:
-            level, title, xp, _ = get_level()
-            xp_str = f"Lv{level} {xp}XP"
-        except:
+            prog = get_level_progress()
+            if prog["level"] >= prog["max_level"]:
+                xp_str = f"Lv{prog['level']} MAX"
+            else:
+                xp_str = f"Lv{prog['level']} {prog['xp_in_level']}/{prog['xp_needed_this_level']}"
+        except Exception:
             xp_str = ""
         
         # Draw status on left, XP on right
@@ -246,50 +315,9 @@ def render_ui(mood="happy", status_text="", fast_mode=True):
         # Face selection — THE SINGLE SOURCE OF TRUTH!
         # All faces are defined here. Other files just reference this.
         # Style: Use Unicode kaomoji with ◕ ‿ ω ♥ ■ ಠ etc.
-        faces = {
-            # === BASIC EMOTIONS ===
-            "happy":        "(◕‿◕)",
-            "happy2":       "(•‿‿•)",
-            "sad":          "(╥☁╥ )",
-            "excited":      "(ᵔ◡◡ᵔ)",
-            "thinking":     "(￣ω￣)",
-            "love":         "(♥‿‿♥)",
-            "surprised":    "(◉_◉)",
-            "grateful":     "(^‿‿^)",
-            "motivated":    "(☼‿‿☼)",
-            
-            # === STATES ===
-            "bored":        "(-__-)",
-            "sleeping":     "( -_-)zZ",
-            "sleeping_pwn": "(⇀‿‿↼)", # Pwnagotchi style
-            "awakening":    "(≖‿‿≖)",
-            "observing":    "( ⚆⚆)",
-            "intense":      "(°▃▃°)",
-            "cool":         "(⌐■_■)",
-            "hacker":       "[■_■]",
-            "smart":        "(✜‿‿✜)",
-            "broken":       "(☓‿‿☓)",
-            "debug":        "(#__#)",
-            
-            # === EXTENDED ===
-            "angry":        "(╬ಠ益ಠ)",
-            "crying":       "(ಥ﹏ಥ)",
-            "proud":        "(๑•̀ᴗ•́)و",
-            "nervous":      "(°△°;)",
-            "confused":     "(◎_◎;)",
-            "mischievous":  "(◕‿↼)",
-            "wink":         "(◕‿◕✿)",
-            "dead":         "(✖_✖)",
-            "shock":        "(◯△◯)",
-            "suspicious":   "(¬_¬)",
-            "smug":         "(￣ω￣)",
-            "cheering":     "\\(◕◡◕)/",
-            "celebrate":    "★(◕‿◕)★",
-            "dizzy":        "(@_@)",
-            "lonely":       "(ب__ب)",
-            "demotivated":  "(≖__≖)",
-        }
-        face_str = faces.get(mood, faces['happy'])
+        # Load custom faces from JSON (bot can add its own!)
+        faces = _load_all_faces()
+        face_str = faces.get(mood, faces.get('happy', "(◕‿◕)"))
         
         # Measure Face (Fallback aware for complex symbols)
         fw = get_text_width(face_str, font_face, font_emoji_face)

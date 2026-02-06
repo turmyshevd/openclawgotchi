@@ -2,6 +2,32 @@
 
 All notable changes to the OpenClawGotchi project will be documented in this file.
 
+## [Unreleased] - 2026-02-06
+
+### Added
+- **Soul & Identity in context**: `SOUL.md` and `IDENTITY.md` are now loaded during heartbeat for self-reflection, and lazily on identity-related questions. Bot can update them via `write_file()`.
+- **`log_change` tool**: Bot maintains its own `.workspace/CHANGELOG.md` automatically after self-modifications.
+- **`manage_service` tool**: Safe systemd wrapper with whitelist (gotchi-bot, ssh, networking, cron). Actions: status, restart, stop, start, logs.
+- **`show_face` tool**: Wired into TOOL_MAP and TOOLS — was defined but never callable by the bot.
+- **Self-Maintenance section** in BOT_INSTRUCTIONS.md: check_syntax → safe_restart flow, log_change after changes, health_check for diagnostics.
+- **Heartbeat reflection logging**: Reflection text now saved to `memory/YYYY-MM-DD.md` daily logs.
+- **Custom faces in display skill**: `add_custom_face()` documented, `data/custom_faces.json` mentioned.
+
+### Changed
+- **BOT_INSTRUCTIONS.md**: Slimmed from 86 to 58 lines — removed duplicate formatting examples, added Self-Knowledge Files and Self-Maintenance sections.
+- **ARCHITECTURE.md**: Rewritten — correct 20 levels, 4h heartbeat interval, all current tools listed, context loading explained.
+- **AGENTS.md**: Fixed `claude_bot.db` → `gotchi.db`, removed table formatting references.
+- **IDENTITY.md**: Removed table mention from personality traits.
+- **Telegram formatting**: NO markdown tables — use emoji + key:value in code blocks instead.
+- **coding/SKILL.md**: Added all missing tools (log_change, manage_service, check_mail, etc.), updated self-modification flow with changelog step.
+- **display/SKILL.md**: Added `add_custom_face` tool and custom faces info.
+- **All `claude-bot` references → `gotchi-bot`** in gotchi-skills.
+- **All `claude_bot.db` references → `gotchi.db`** across workspace, gitignore, skills.
+
+### Removed
+- `.workspace/hooks/bot_mail.py` — duplicated heartbeat.py mail logic, referenced wrong DB.
+- `.workspace/.claude/commands/bot.md` — completely outdated (referenced old project structure).
+
 ## [Unreleased] - 2026-02-05
 
 ### Added

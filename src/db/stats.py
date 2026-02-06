@@ -12,38 +12,60 @@ from config import DB_PATH
 
 log = logging.getLogger(__name__)
 
-# XP rewards
+# XP rewards (RPG-style)
 XP_MESSAGE = 10        # Per message answered
-XP_TASK = 25           # Per task completed  
+XP_TASK = 25           # Per task completed
 XP_BROTHER_CHAT = 50   # Per brother interaction
 XP_DAY_ALIVE = 100     # Per day survived
 XP_HEARTBEAT = 5       # Per successful heartbeat
+XP_TOOL_USE = 5        # Per tool used in a response (capped per message)
 
-# Level thresholds (XP needed for each level)
+# Level thresholds: total XP needed to reach each level (20 levels)
 LEVEL_THRESHOLDS = [
-    0,      # Level 1
-    100,    # Level 2
-    300,    # Level 3
-    600,    # Level 4
-    1000,   # Level 5
-    1500,   # Level 6
-    2500,   # Level 7
-    4000,   # Level 8
-    6000,   # Level 9
-    10000,  # Level 10 - Master
+    0,       # 1
+    100,     # 2
+    300,     # 3
+    600,     # 4
+    1000,    # 5
+    1500,    # 6
+    2500,    # 7
+    4000,    # 8
+    6000,    # 9
+    10000,   # 10
+    15000,   # 11
+    21000,   # 12
+    28000,   # 13
+    36000,   # 14
+    45000,   # 15
+    55000,   # 16
+    67000,   # 17
+    80000,   # 18
+    95000,   # 19
+    120000,  # 20 - max
 ]
 
+# Titles: silly / Battlefield vibe — no "Veteran Master" seriousness
 LEVEL_TITLES = [
-    "Newborn",      # 1
-    "Awakened",     # 2
-    "Learning",     # 3
-    "Growing",      # 4
-    "Capable",      # 5
-    "Skilled",      # 6
-    "Expert",       # 7
-    "Master",       # 8
-    "Legendary",    # 9
-    "Transcendent", # 10
+    "Newborn",           # 1
+    "Just Woke Up",      # 2
+    "Eyes Open",        # 3
+    "Touched Grass",    # 4
+    "Cron Job Enjoyer", # 5
+    "Reply Guy",        # 6
+    "No-Touch Grass",   # 7
+    "Raspberry Pi Boss",# 8
+    "Brother's Keeper", # 9
+    "0xDEADBEEF",       # 10
+    "Packet Sniffer",   # 11
+    "Sudo Make Sandwich", # 12
+    "404 Brain Not Found", # 13
+    "Kernel Panic",     # 14
+    "Segfault Survivor",# 15
+    "RAM Whisperer",    # 16
+    "E-Ink Legend",     # 17
+    "Gotchi Prime",     # 18
+    "BF6 Reject",       # 19
+    "Absolute Unit",    # 20
 ]
 
 # Level-up callback (set by main.py or display module)
@@ -170,6 +192,47 @@ def get_level() -> tuple[int, str, int, int]:
     return level, title, xp, max(0, xp_to_next)
 
 
+def get_level_progress() -> dict:
+    """
+    Get RPG-style progress: XP within current level, XP needed for this level.
+    For display: "250/300 to Lv4" or progress bar.
+    """
+    xp = get_stat("xp")
+    level = get_level_for_xp(xp)
+    title = LEVEL_TITLES[level - 1]
+    xp_at_level_start = LEVEL_THRESHOLDS[level - 1]
+    xp_in_level = xp - xp_at_level_start  # How much into current level
+    
+    if level >= len(LEVEL_THRESHOLDS):
+        xp_needed_this_level = 0
+        xp_to_next = 0
+    else:
+        xp_needed_this_level = LEVEL_THRESHOLDS[level] - xp_at_level_start
+        xp_to_next = LEVEL_THRESHOLDS[level] - xp
+    
+    return {
+        "level": level,
+        "title": title,
+        "xp": xp,
+        "xp_in_level": xp_in_level,
+        "xp_needed_this_level": xp_needed_this_level,
+        "xp_to_next": max(0, xp_to_next),
+        "max_level": len(LEVEL_TITLES),
+    }
+
+
+def get_xp_rules() -> list[tuple[str, int, str]]:
+    """Return list of (action, xp_amount, description) for /xp help."""
+    return [
+        ("Answer a message", XP_MESSAGE, "Every reply to user"),
+        ("Use a tool", XP_TOOL_USE, "Per tool used in a response"),
+        ("Complete a task", XP_TASK, "Cron/pending task done"),
+        ("Brother chat", XP_BROTHER_CHAT, "Mail/group with sibling bot"),
+        ("Heartbeat", XP_HEARTBEAT, "Every 4h reflection"),
+        ("Day survived", XP_DAY_ALIVE, "Once per calendar day"),
+    ]
+
+
 def get_days_alive() -> int:
     """Calculate days alive from first_boot timestamp."""
     first_boot = get_stat("first_boot")
@@ -179,19 +242,21 @@ def get_days_alive() -> int:
 
 
 def get_stats_summary() -> dict:
-    """Get full stats summary for display."""
-    level, title, xp, xp_to_next = get_level()
-    
+    """Get full stats summary for display (includes RPG progress)."""
+    prog = get_level_progress()
     return {
-        "level": level,
-        "title": title,
-        "xp": xp,
-        "xp_to_next": xp_to_next,
+        "level": prog["level"],
+        "title": prog["title"],
+        "xp": prog["xp"],
+        "xp_to_next": prog["xp_to_next"],
+        "xp_in_level": prog["xp_in_level"],
+        "xp_needed_this_level": prog["xp_needed_this_level"],
+        "max_level": prog["max_level"],
         "messages": get_stat("messages_answered"),
         "tasks": get_stat("tasks_completed"),
         "brother_chats": get_stat("brother_chats"),
         "heartbeats": get_stat("heartbeats"),
-        "days_alive": get_days_alive(),  # Now consistent!
+        "days_alive": get_days_alive(),
     }
 
 
@@ -232,6 +297,13 @@ def on_brother_chat():
     """Call when interacting with brother."""
     increment_stat("brother_chats")
     add_xp(XP_BROTHER_CHAT, "brother")
+
+
+def on_tool_use(count: int = 1):
+    """Call when bot uses tools in a response."""
+    if count > 0:
+        increment_stat("tools_used", count)
+        add_xp(XP_TOOL_USE * count, f"tools x{count}")
 
 
 def on_heartbeat():

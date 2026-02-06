@@ -16,8 +16,8 @@ log = logging.getLogger(__name__)
 # Threshold: when history is this % full, suggest memory flush
 FLUSH_THRESHOLD = 0.8  # 80% of HISTORY_LIMIT
 
-# Track last summarized message count to avoid re-summarizing
-_last_summary_msg_count = 0
+# Track last summarized message count per chat to avoid re-summarizing
+_last_summary_msg_count: dict[int, int] = {}
 
 
 def should_flush(current_messages: int) -> bool:
@@ -108,21 +108,20 @@ Conversation:
 Summary (bullet points only):"""
 
 
-async def summarize_conversation_with_llm(history: list[dict]) -> str | None:
+async def summarize_conversation_with_llm(history: list[dict], chat_id: int = 0) -> str | None:
     """
     Use LLM to create a brief summary of conversation.
     Called during heartbeat, not in main message flow.
     
     Returns summary string or None if failed/skipped.
     """
-    global _last_summary_msg_count
-    
     if not history or len(history) < 3:
         return None  # Not enough to summarize
     
-    # Skip if we already summarized this
-    if len(history) <= _last_summary_msg_count:
-        log.debug("Skipping summary — no new messages since last")
+    # Skip if we already summarized this chat
+    last_count = _last_summary_msg_count.get(chat_id, 0)
+    if len(history) <= last_count:
+        log.debug(f"Skipping summary for chat {chat_id} — no new messages since last")
         return None
     
     # Format conversation for summarization
@@ -142,21 +141,27 @@ async def summarize_conversation_with_llm(history: list[dict]) -> str | None:
     prompt = SUMMARY_PROMPT.format(conversation=conversation)
     
     try:
-        # Use LiteLLM for summarization (fast, cheap)
+        # Use LiteLLM for summarization (same preset as Lite mode)
         from litellm import acompletion
-        from config import GEMINI_MODEL
+        from config import DEFAULT_LITE_PRESET, LLM_PRESETS
         
-        response = await acompletion(
-            model=GEMINI_MODEL,
+        preset = LLM_PRESETS.get(DEFAULT_LITE_PRESET, LLM_PRESETS["glm"])
+        model = preset["model"]
+        kwargs = dict(
+            model=model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=150,
-            temperature=0.3,  # Low temp for factual summary
+            temperature=0.3,
         )
+        if preset.get("api_base"):
+            kwargs["api_base"] = preset["api_base"]
+        
+        response = await acompletion(**kwargs)
         
         summary = response.choices[0].message.content.strip()
         
-        # Update tracking
-        _last_summary_msg_count = len(history)
+        # Update tracking for this chat
+        _last_summary_msg_count[chat_id] = len(history)
         
         log.info(f"LLM summary generated: {summary[:50]}...")
         return summary
@@ -179,7 +184,7 @@ async def summarize_and_save(chat_id: int) -> bool:
     if not history:
         return False
     
-    summary = await summarize_conversation_with_llm(history)
+    summary = await summarize_conversation_with_llm(history, chat_id=chat_id)
     if not summary:
         return False
     

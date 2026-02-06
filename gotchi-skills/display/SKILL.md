@@ -51,11 +51,19 @@ SAY:Hello!
 
 ## Adding New Faces
 
-Edit `src/ui/gotchi_ui.py`, find `faces = {`, add your face:
+**Option 1: Via tool (recommended)**
+Use the `add_custom_face()` tool — saves to `data/custom_faces.json`, persists across restarts:
+```
+add_custom_face("myface", "(◕‿◕)♪")
+```
 
+**Option 2: Edit code**
+Edit `src/ui/gotchi_ui.py`, find `faces = {`, add your face:
 ```python
 "your_mood": "(your_kaomoji)",
 ```
+
+Custom faces from `data/custom_faces.json` are merged with defaults on each render.
 
 **Style guide:**
 - Use Unicode kaomoji: ◕ ‿ ω ♥ ■ ಠ ╭ ╮ ﾉ ヮ

@@ -73,6 +73,18 @@ def init_db():
         )
     """)
     
+    # Bot mail (sibling-to-sibling messages)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS bot_mail (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            from_bot TEXT,
+            to_bot TEXT,
+            message TEXT,
+            timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+            read_at TEXT
+        )
+    """)
+    
     conn.commit()
     conn.close()
 

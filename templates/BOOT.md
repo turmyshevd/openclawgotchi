@@ -1,30 +1,29 @@
-# BOOT.md — Startup Checklist
+# BOOT.md — Startup Behavior
 
-_Add short, explicit instructions for what the bot should do on startup._
+_What happens when the bot service starts._
 
-## On Service Start
+## Current Startup Sequence (automatic)
 
-When the bot service starts, do these checks:
+1. **Database init** — creates tables if missing
+2. **Skills loaded** — gotchi-skills + openclaw-skills catalog
+3. **Hooks loaded** — event automation
+4. **E-Ink boot screen** — shows sleeping face + "Zzz..."
+5. **Startup hook fired** — logs to audit trail
+6. **Mail check** — processes pending command mail from brother
+7. **E-Ink online** — shows sleeping face + "Online (Zzz...)"
+8. **After 60s** — switches to cool face + "Chilling..."
+9. **First heartbeat** — after 1 minute, then every 4 hours
 
-1. Verify hardware is healthy (temp < 70C, mem > 50MB free)
-2. Update display if available (show "Online" or current mood)
-3. Optionally send a startup message to owner
+## Onboarding (first run only)
 
-## Example Tasks
+If `.workspace/BOOTSTRAP.md` exists:
+- First message triggers onboarding mode
+- Bot asks about identity, personality, preferences
+- Updates IDENTITY.md, USER.md, SOUL.md
+- Deletes BOOTSTRAP.md when done
 
-```
-# Check system health
-# If temp > 70C: FACE: sad, DM: "I'm overheating!"
-# If mem < 50MB: FACE: thinking, DM: "Low memory warning"
-# Otherwise: FACE: happy, DISPLAY: Online
-```
+## Notes
 
-## Keep It Short
-
-This file runs on every restart. Keep it minimal to avoid token burn.
-
-If the task sends a message, just do it — no confirmation needed.
-
----
-
-_Delete or comment out this content if you don't need startup tasks._
+- Bot won't start without `.env` (token required)
+- `.workspace/` is auto-created from `templates/` on first run
+- setup.sh handles .env creation, dependencies, systemd service

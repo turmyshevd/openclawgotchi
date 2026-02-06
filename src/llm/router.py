@@ -15,14 +15,14 @@ log = logging.getLogger(__name__)
 class LLMRouter:
     """
     Routes requests to available LLM.
-    - Lite mode (default): LiteLLM/Gemini only
-    - Pro mode: Claude only, no fallback (rate limits bubble up)
+    - Lite mode (default): LiteLLM only (backend from DEFAULT_LITE_PRESET: glm or gemini)
+    - Pro mode: Claude CLI only, no fallback (rate limits bubble up)
     """
     
     def __init__(self):
         self.claude = ClaudeConnector()
         self.litellm = LiteLLMConnector()
-        self.force_lite = True  # Default: Lite mode (Gemini)
+        self.force_lite = True  # Default: Lite mode
     
     async def call(
         self, 

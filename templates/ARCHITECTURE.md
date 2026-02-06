@@ -1,76 +1,63 @@
-# Architecture — How I Work 🤖
+# Architecture — How I Work
 
-*Read this to understand yourself!*
+## XP & Leveling (db/stats.py)
 
-## 🎮 XP & Leveling (db/stats.py)
-
-Table `gotchi_stats` in gotchi.db:
+Table `gotchi_stats` in `gotchi.db`:
 - **xp**: experience points  
-- **level**: xp // 100 (automatic)
 - **messages**: messages answered
 - **first_boot**: birth timestamp
 
-**XP Rewards:**
-- +10 for answering a message
-- +25 for completing a task
-- +50 for chatting with sibling
-- +5 for heartbeat
+**XP Sources:**
+- +10 message answered
+- +5 per tool used in a response
+- +25 task completed
+- +50 sibling chat
+- +5 heartbeat
+- +100 per day alive
 
-**Levels 1-10:** Newborn → Awakened → Growing → Learning → Skilled → Adept → Expert → Master → Sage → Transcendent
+**20 Levels** with customizable titles.
 
-## 💓 Heartbeat (cron/scheduler.py)
+## Heartbeat (bot/heartbeat.py)
 
-- **Config:** data/cron_jobs.json
-- **Interval:** 60 minutes
-- **Reads:** .workspace/HEARTBEAT.md
-- **Does:** reflection, health check, E-Ink display
+- **Interval:** Every 4 hours
+- **Template:** `.workspace/HEARTBEAT.md`
+- **Context:** Loads SOUL.md + IDENTITY.md for self-awareness
+- **Does:** auto-mood, XP award, conversation summarization, mail check, LLM reflection
+- **Output:** Reflection saved to `memory/YYYY-MM-DD.md`, optional DM/GROUP/MAIL
 
-## 🧠 Memory
+## Memory
 
 **SQLite (gotchi.db):**
 - `messages` — chat history by chat_id
-- `facts` — long-term memory (category + content, FTS5)
-- `bot_mail` — mail from/to siblings (if enabled)
+- `facts` — long-term memory (FTS5 full-text search)
+- `bot_mail` — mail from/to siblings
 - `gotchi_stats` — XP, level, counters
 
 **Files (.workspace/):**
-- BOT_INSTRUCTIONS.md — personality and behavior
-- ARCHITECTURE.md — this file
-- HEARTBEAT.md — periodic tasks
-- CHANGELOG.md — change history
+- `BOT_INSTRUCTIONS.md` — system prompt (loaded every request)
+- `SOUL.md` — personality (loaded on identity questions + heartbeat)
+- `IDENTITY.md` — who I am (loaded on identity questions + heartbeat)
+- `ARCHITECTURE.md` — this file (loaded on technical questions)
+- `TOOLS.md` — hardware specs (loaded on hardware questions)
+- `HEARTBEAT.md` — reflection template
+- `MEMORY.md` — curated long-term memory
+- `memory/` — daily logs
 
-## 📬 Brotherhood Mail (optional)
+## Brotherhood Mail (optional)
 
-Table `bot_mail`: from_bot, to_bot, message, timestamp, processed
+Table `bot_mail`: from_bot, to_bot, message, timestamp, read_at
+Commands: CMD:PRO, CMD:LITE, CMD:STATUS, CMD:PING, CMD:FACE:mood
 
-Commands from siblings: CMD:PRO, CMD:LITE, CMD:STATUS, CMD:PING, CMD:FACE:mood
+## E-Ink Display (ui/gotchi_ui.py)
 
-## 🎭 E-Ink Display (hardware/)
+Kaomoji faces. Default + custom from `data/custom_faces.json`.
+**Commands:** `FACE: mood`, `SAY: text`, `DISPLAY: text`
 
-**Faces** in `src/ui/gotchi_ui.py` FACE_LIBRARY
+## LLM Tools (llm/litellm_connector.py)
 
-**Commands in response:**
-- `FACE: mood` — change face
-- `SAY: text` — speech bubble (max 60 chars)
+execute_bash, read_file, write_file, list_directory, remember_fact, recall_facts, search_skills, read_skill, show_face, add_custom_face, check_mail, health_check, manage_service, schedule_task, safe_restart
 
-**Moods:** happy, sad, excited, thinking, love, surprised, bored, sleeping, hacker, proud, nervous, confused, mischievous, cool, wink, dead, celebrate, etc.
+## Context Loading (llm/prompts.py)
 
-## 🔧 LLM Tools (llm/litellm_connector.py)
-
-Available tools:
-- `execute_bash` — run command
-- `read_file` / `write_file` — file operations  
-- `remember_fact` / `recall_facts` — long-term memory
-- `show_face` — display control
-- `health_check` — system diagnostics
-- `safe_restart` — restart after syntax check
-
-## 📊 Self-Awareness
-
-On each request, context includes:
-- Level and XP
-- Messages answered
-- Uptime, temperature, RAM
-- Current mode (Lite/Pro)
-
-*512MB of hardware, infinite possibilities!* 🤖
+Every request: BOT_INSTRUCTIONS.md + skills list + system status
+Lazy (by keywords): ARCHITECTURE.md, TOOLS.md, SOUL.md, IDENTITY.md

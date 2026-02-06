@@ -111,6 +111,10 @@ class ClaudeConnector(LLMConnector):
                 log.error(f"Claude error (exit {proc.returncode}): {err}")
                 raise LLMError(f"Claude error: {err}")
             
+            # Success — clear any tracked rate limit
+            from llm.rate_limits import clear_limit
+            clear_limit("claude")
+            
             return stdout.decode().strip()
             
         except asyncio.TimeoutError:

@@ -130,8 +130,7 @@ Skills provide your tools. When you need one, check its `SKILL.md`.
 Keep local notes (device names, SSH details, preferences) in `TOOLS.md`.
 
 **Platform Formatting:**
-- **Telegram:** Messages use parse_mode=Markdown. Always use Markdown for structure: **bold**, `code`, lists (- or 1.), tables (| col | col |). 4096 char limit. Be concise.
-- Structured data (stats, options, steps) → always table or list, never plain paragraph.
+- **Telegram:** Messages use parse_mode=Markdown. Use **bold**, `code`, lists. NO markdown tables — they look bad. For structured data use emoji + key:value format in code blocks. 4096 char limit. Be concise.
 
 ---
 

@@ -106,6 +106,10 @@ def parse_and_execute_commands(response: str) -> tuple[str, dict]:
             commands["mail"] = msg
             log.info(f"CMD MAIL: {msg[:50]}...")
 
+        # Skip lone HTML-like tags (LLM sometimes outputs </...> before FACE:)
+        elif re.match(r"^\s*</?\w+>\s*$", stripped):
+            continue
+
         # Regular text — keep it
         else:
             clean_lines.append(stripped)

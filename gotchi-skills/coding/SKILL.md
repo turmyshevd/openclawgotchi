@@ -67,7 +67,7 @@ openclawgotchi/
 │   ├── skills/              # SKILLS LOADER
 │   │   └── loader.py        # Gating (requires: bins, env, os)
 │   │
-│   ├── logging/             # AUDIT
+│   ├── audit_logging/       # AUDIT
 │   │   └── command_logger.py  # JSONL trail
 │   │
 │   ├── memory/              # MEMORY UTILS
@@ -93,7 +93,7 @@ openclawgotchi/
 ├── data/                    # RUNTIME DATA
 │   └── cron_jobs.json       # Scheduled tasks
 │
-└── claude_bot.db            # SQLite database
+└── gotchi.db                # SQLite database
 ```
 
 ---
@@ -123,13 +123,22 @@ openclawgotchi/
 | `write_file(path, content)` | Write/create (auto-backup) |
 | `execute_bash(command)` | Run shell commands |
 | `list_directory(path)` | List files |
-| `show_face(mood, text)` | Display emotion |
+| `show_face(mood, text)` | Display emotion on E-Ink |
+| `add_custom_face(name, kaomoji)` | Add new E-Ink face |
 | `remember_fact(cat, fact)` | Save to memory |
 | `recall_facts(query)` | Search memory |
+| `search_skills(query)` | Find skills by name/description |
 | `read_skill(name)` | Read skill docs |
 | `write_daily_log(entry)` | Log to daily file |
+| `log_change(description)` | Log to CHANGELOG.md (use after every change!) |
+| `git_command(command)` | Run git: status, log, diff, add, commit, branch, stash |
+| `check_mail()` | Check unread mail from brother |
+| `health_check()` | System diagnostics (internet, disk, temp, service, errors) |
+| `manage_service(svc, action)` | Manage systemd services (status/restart/stop/start/logs) |
+| `check_syntax(file_path)` | Verify Python file syntax |
+| `safe_restart()` | Check syntax + restart bot service |
+| `restore_from_backup(path)` | Restore file from .bak backup |
 | `add_scheduled_task(...)` | Add cron job |
-| `restart_self()` | Restart bot service |
 
 ---
 
@@ -152,7 +161,7 @@ async def cmd_mycommand(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ```python
 app.add_handler(CommandHandler("mycommand", cmd_mycommand))
 ```
-4. Restart: `sudo systemctl restart claude-bot`
+4. Restart: `sudo systemctl restart gotchi-bot`
 
 ### Add a New E-Ink Face
 
@@ -243,11 +252,11 @@ restart_self()
 python3 -m py_compile src/bot/handlers.py
 
 # Restart
-sudo systemctl restart claude-bot
+sudo systemctl restart gotchi-bot
 
 # Check status
-sudo systemctl status claude-bot
-journalctl -u claude-bot -n 20
+sudo systemctl status gotchi-bot
+journalctl -u gotchi-bot -n 20
 ```
 
 ---
@@ -255,13 +264,22 @@ journalctl -u claude-bot -n 20
 ## Complete Self-Modification Flow
 
 ```
-1. read_skill("coding")           # Understand project structure
-2. read_file("src/bot/handlers.py")   # Read current code
-3. write_file("src/bot/handlers.py", new_code)  # Modify (auto-backup)
-4. check_syntax("src/bot/handlers.py")  # Verify
-5. **UPDATE CHANGELOG**: Append description of change to `CHANGELOG.md` under [Unreleased]
-6. write_daily_log("Added /ping command")  # Log the change
-7. safe_restart()                 # Apply changes
+1. read_skill("coding")                    # Understand project structure
+2. read_file("src/bot/handlers.py")        # Read current code
+3. write_file("src/bot/handlers.py", code) # Modify (auto-backup)
+4. check_syntax("src/bot/handlers.py")     # Verify syntax
+5. log_change("Added /ping command")       # Record in CHANGELOG.md
+6. git_command("add -A")                   # Stage changes
+7. git_command("commit -m 'feat: add /ping command'")  # Commit!
+8. safe_restart()                          # Check all + restart
 ```
 
 The bot will restart, reload the new code, and come back online.
+
+**Git workflow:** Always commit after code changes. Use conventional commits:
+- `feat:` new feature, `fix:` bug fix, `docs:` documentation, `style:` formatting
+- `git_command("status")` to check what changed
+- `git_command("diff")` to review changes before committing
+- `git_command("log --oneline -5")` to see recent history
+
+**IMPORTANT:** Always `log_change()` + `git_command("commit")` after modifications.

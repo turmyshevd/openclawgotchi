@@ -55,7 +55,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"Hi {user.first_name}! I'm your AI assistant on Raspberry Pi.\n\n"
         f"*Commands:*\n"
-        f"/status — system & XP status\n"
+        f"/status — system & XP\n"
+        f"/xp — XP rules & progress\n"
         f"/context — view/trim context window\n"
         f"/clear — wipe conversation history\n"
         f"/pro — toggle Lite/Pro mode\n"
@@ -98,31 +99,27 @@ async def cmd_context(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(user.id, chat.id):
         return
     
-    from config import HISTORY_LIMIT
+    from config import HISTORY_LIMIT, MODEL_CONTEXT_TOKENS
     
     msg_count = get_message_count(chat.id)
-    history = get_history(chat.id)
+    history = get_history(chat.id)  # last HISTORY_LIMIT messages only
     
-    # Calculate context usage
-    used_in_context = min(msg_count, HISTORY_LIMIT)
-    usage_pct = int((used_in_context / HISTORY_LIMIT) * 100)
-    
-    # Visual progress bar
-    filled = int(usage_pct / 10)
-    bar = "█" * filled + "░" * (10 - filled)
-    
-    # Estimate tokens (rough: ~4 chars per token)
+    # Tokens actually sent to model (history only; system prompt is extra)
     total_chars = sum(len(m.get("content", "")) for m in history)
     est_tokens = total_chars // 4
+    # Model context window usage (history vs model limit)
+    usage_pct_model = min(100, (est_tokens * 100) // MODEL_CONTEXT_TOKENS)
+    filled = min(10, (usage_pct_model * 10) // 100)
+    bar = "█" * filled + "░" * (10 - filled)
     
     msg = (
         f"📊 *Context Window*\n\n"
-        f"Messages in context: {used_in_context}/{HISTORY_LIMIT}\n"
-        f"Usage: [{bar}] {usage_pct}%\n"
-        f"Est. tokens: ~{est_tokens}\n"
-        f"Total in DB: {msg_count}\n\n"
-        f"*Commands:*\n"
-        f"/clear — wipe all history\n"
+        f"*Model window:* ~{est_tokens:,} / {MODEL_CONTEXT_TOKENS:,} tokens\n"
+        f"[{bar}] {usage_pct_model}%\n"
+        f"Messages in context: {len(history)}/{HISTORY_LIMIT} (total in DB: {msg_count})\n\n"
+        f"On each message we send this history to the model (no persistent session).\n"
+        f"*To clear model context:*\n"
+        f"/clear — wipe all history (model sees nothing next time)\n"
         f"/context trim — keep last 3 messages\n"
         f"/context sum — summarize & save to memory"
     )
@@ -190,10 +187,20 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     jobs = list_cron_jobs()
     active_jobs = len([j for j in jobs if j.enabled])
     
-    # Build status message
+    # RPG-style XP progress bar (10 segments)
+    xp_in = gotchi_stats.get("xp_in_level", 0)
+    xp_need = gotchi_stats.get("xp_needed_this_level") or 1
+    max_lv = gotchi_stats.get("max_level", 20)
+    if gotchi_stats["level"] >= max_lv:
+        xp_bar = "█" * 10 + " MAX"
+    else:
+        filled = min(10, int(10 * xp_in / xp_need)) if xp_need else 0
+        xp_bar = "█" * filled + "░" * (10 - filled)
+        xp_bar += f" {xp_in}/{xp_need}"
+    
     msg = (
         f"🎮 *Lv{gotchi_stats['level']} {gotchi_stats['title']}*\n"
-        f"XP: {gotchi_stats['xp']} | Next: {gotchi_stats['xp_to_next']}\n"
+        f"XP: {gotchi_stats['xp']} | {xp_bar}\n"
         f"Days: {gotchi_stats['days_alive']} | Msgs: {gotchi_stats['messages']}\n\n"
         f"*System*\n"
         f"⏱ {stats.uptime} | 🌡 {stats.temp}\n"
@@ -208,6 +215,47 @@ async def cmd_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(msg, parse_mode="Markdown")
 
+
+async def cmd_xp(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /xp — RPG-style XP rules and current progress (no tables for Telegram)."""
+    user = update.effective_user
+    chat = update.effective_chat
+    
+    if not is_allowed(user.id, chat.id):
+        return
+    
+    from db.stats import get_level_progress, get_xp_rules
+    
+    prog = get_level_progress()
+    rules = get_xp_rules()
+    
+    # Progress bar
+    xp_in = prog["xp_in_level"]
+    xp_need = prog["xp_needed_this_level"] or 1
+    if prog["level"] >= prog["max_level"]:
+        xp_bar = "█" * 10 + " MAX"
+        progress_line = f"Lv{prog['level']} {prog['title']} — {xp_bar}"
+    else:
+        filled = min(10, int(10 * xp_in / xp_need)) if xp_need else 0
+        xp_bar = "█" * filled + "░" * (10 - filled)
+        progress_line = f"Lv{prog['level']} {prog['title']} — {xp_bar} {xp_in}/{xp_need} to Lv{prog['level'] + 1}"
+    
+    lines = [
+        "📊 *XP & Levels*",
+        "",
+        progress_line,
+        f"Total XP: {prog['xp']}",
+        "",
+        "*How you earn XP:*",
+    ]
+    for action, amount, desc in rules:
+        lines.append(f"• {action}: *+{amount}* — {desc}")
+    lines.append("")
+    lines.append(f"Levels 1–{prog['max_level']}. Use /status for full stats.")
+    
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+
 async def cmd_pro(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /pro command — toggle between Lite and Pro."""
     user = update.effective_user
@@ -221,7 +269,8 @@ async def cmd_pro(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if is_lite:
         show_face("cool", "SAY: Fast & Free! | MODE: L | STATUS: Lite Mode")
-        await update.message.reply_text("✨ Mode: Lite (Gemini) — Fast & Free")
+        current = router.litellm.model.split("/")[-1] if getattr(router.litellm, "model", None) else "LiteLLM"
+        await update.message.reply_text(f"✨ Mode: Lite — {current}\n(Use /use gemini or /use glm to switch backend)")
     else:
         show_face("smart", "SAY: Heavy thinking... | MODE: P | STATUS: Pro Mode")
         await update.message.reply_text("🧠 Mode: Pro (Claude Code) — Smart & Heavy")
@@ -493,11 +542,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Parse hardware commands
         clean_text, cmds = parse_and_execute_commands(response)
         
+        # Fallback: if LLM didn't include FACE:, show a default face
+        if not cmds.get("face"):
+            show_face(mood="happy", text=clean_text[:50] if clean_text else "...")
+        
         # Execute memory command
         if cmds.get("remember"):
             add_fact(cmds["remember"], "auto_memory")
-            # Subtle confirmation? Or just silent. Silent is better for fluidity.
             log.info(f"Auto-remembered: {cmds['remember']}")
+        
+        # Execute mail command (MAIL: in LLM response)
+        if cmds.get("mail"):
+            try:
+                from bot.heartbeat import send_mail
+                from config import SIBLING_BOT_NAME
+                if SIBLING_BOT_NAME:
+                    send_mail(SIBLING_BOT_NAME, cmds["mail"])
+                    log.info(f"Mail sent to {SIBLING_BOT_NAME}: {cmds['mail'][:50]}")
+                else:
+                    log.warning("MAIL: command but no SIBLING_BOT_NAME configured")
+            except Exception as e:
+                log.error(f"Failed to send mail: {e}")
         
         # Save response
         save_message(conv_id, "assistant", response)
@@ -511,16 +576,34 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         from audit_logging.command_logger import log_bot_response
         log_bot_response(conv_id, response, connector)
         
-        # Add lite mode indicator
-        if connector == "litellm":
-            clean_text += "\n\n⚡ Lite Mode"
-            await send_long_message(update, clean_text, parse_mode="Markdown")
-        else:
-            await send_long_message(update, clean_text)
+        # Action confirmations for parsed commands (not tools)
+        cmd_notes = []
+        if cmds.get("mail"):
+            from config import SIBLING_BOT_NAME
+            if SIBLING_BOT_NAME:
+                cmd_notes.append(f"📨 mail → {SIBLING_BOT_NAME}: \"{cmds['mail'][:40]}\" ✓")
+        if cmds.get("remember"):
+            cmd_notes.append(f"🧠 remembered: \"{cmds['remember'][:40]}\"")
+        if cmd_notes:
+            clean_text += "\n\n```\n🔧 " + "\n  ".join(cmd_notes) + "\n```"
+        
+        # Mode indicator only for Pro (Lite = default, no label)
+        if connector != "litellm":
+            clean_text += "\n\n🧠 Pro"
+        await send_long_message(update, clean_text, parse_mode="Markdown" if connector == "litellm" else None)
 
         # AWARD XP LAST — Avoid Level Up overwriting the response on E-Ink
-        from db.stats import on_message_answered
+        from db.stats import on_message_answered, on_tool_use
         on_message_answered()
+        
+        # Count tool actions from response footer for XP bonus
+        import re
+        tool_match = re.search(r'Tool usage \((\d+)\):', response)
+        if tool_match:
+            on_tool_use(int(tool_match.group(1)))
+        # Also count parsed commands (MAIL:, REMEMBER:) as tool-like actions
+        elif cmds.get("mail") or cmds.get("remember"):
+            on_tool_use(sum(1 for k in ("mail", "remember") if cmds.get(k)))
             
     except RateLimitError:
         # Queue for later

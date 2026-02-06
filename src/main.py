@@ -29,7 +29,7 @@ from config import BOT_TOKEN, HEARTBEAT_INTERVAL, HEARTBEAT_FIRST_RUN, LEVEL_UP_
 from db.memory import init_db
 from hardware.display import boot_screen, online_screen, show_face
 from bot.handlers import (
-    cmd_start, cmd_clear, cmd_context, cmd_status, cmd_pro, cmd_use,
+    cmd_start, cmd_clear, cmd_context, cmd_status, cmd_xp, cmd_pro, cmd_use,
     cmd_remember, cmd_recall, cmd_cron, cmd_memory, cmd_health, cmd_jobs,
     handle_message
 )
@@ -191,6 +191,7 @@ def main():
     app.add_handler(CommandHandler("clear", cmd_clear))
     app.add_handler(CommandHandler("context", cmd_context))
     app.add_handler(CommandHandler("status", cmd_status))
+    app.add_handler(CommandHandler("xp", cmd_xp))
     app.add_handler(CommandHandler("pro", cmd_pro))
     app.add_handler(CommandHandler("lite", cmd_pro)) 
     app.add_handler(CommandHandler("mode", cmd_pro))
