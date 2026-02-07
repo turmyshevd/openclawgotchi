@@ -570,8 +570,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(response)
             return
         
+        # Split tool usage if present
+        TOOL_MARKER = "|--TOOL_LOG--|"
+        main_text = response
+        tool_footer = ""
+        
+        if TOOL_MARKER in response:
+            parts = response.split(TOOL_MARKER, 1)
+            main_text = parts[0].strip()
+            raw_tools = parts[1].strip()
+            if raw_tools:
+                tool_footer = f"```\n{raw_tools}\n```"
+        
         # Parse hardware commands
-        clean_text, cmds = parse_and_execute_commands(response)
+        clean_text, cmds = parse_and_execute_commands(main_text)
         
         # Fallback: if LLM didn't include FACE:, show a default face
         if not cmds.get("face"):
@@ -599,7 +611,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_message(conv_id, "assistant", response)
         
         # Check if onboarding completed
-        if onboarding_mode and check_onboarding_complete(response):
+        if onboarding_mode and check_onboarding_complete(main_text):
             complete_onboarding()
             log.info("Onboarding completed!")
         
@@ -622,8 +634,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if connector != "litellm":
             clean_text += "\n\n🧠 Pro"
         
-        # Send main response (which now includes tool usage as before)
+        # Send main response
         await send_long_message(update, clean_text, parse_mode="Markdown" if connector == "litellm" else None)
+        
+        # Send tool usage separately for reliability
+        if tool_footer:
+            await send_long_message(update, tool_footer, parse_mode="Markdown")
 
         # AWARD XP LAST — Avoid Level Up overwriting the response on E-Ink
         from db.stats import on_message_answered, on_tool_use

@@ -1084,14 +1084,13 @@ def _build_tool_footer(actions: list[str]) -> str:
     if not visible:
         return ""
     
-    lines = ["```", f"🔧 Tool usage ({len(visible)}):"]
+    lines = [f"🔧 Tool usage ({len(visible)}):"]
     for action in visible[:8]:  # Max 8 to keep it compact
-        # Avoid breaking markdown: no backticks inside the ``` block
+        # Ensure no backticks leak into the code block
         safe = (action or "").replace("`", "'")
         lines.append(f"  {safe}")
     if len(visible) > 8:
         lines.append(f"  ... +{len(visible) - 8} more")
-    lines.append("```")
     
     return "\n".join(lines)
 
@@ -1274,12 +1273,13 @@ class LiteLLMConnector(LLMConnector):
                     
                     final = msg.content or "(empty response)"
                     
-                    # Append tool usage summary if any tools were called
-                    if tool_actions:
-                        footer = _build_tool_footer(tool_actions)
-                        final = f"{final}\n\n{footer}"
+                    # Build tool usage footer with a distinct separator for handlers.py
+                    footer = _build_tool_footer(tool_actions) if tool_actions else ""
                     
-                    return final
+                    # Use a distinct long separator that's unlikely to appear in normal text
+                    SEPARATOR = "\n\n|--TOOL_LOG--|\n"
+                    final_content = final + (SEPARATOR + footer if footer else "")
+                    return final_content
                     
             except Exception as e:
                 err_str = str(e)

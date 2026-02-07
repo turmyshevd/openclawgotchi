@@ -14,6 +14,11 @@ log = logging.getLogger(__name__)
 
 def sanitize_markdown(text: str) -> str:
     """Fix unclosed markdown that breaks Telegram parse."""
+    # Escape underscores that are inside words (likely filenames/paths)
+    # Telegram Legacy Markdown gets confused by litellm_connector.py
+    # We only want formatting if the underscore is at the start/end of a word
+    text = re.sub(r"(\w)_(\w)", r"\1\_\2", text)
+
     # Fix unclosed code blocks
     if text.count("```") % 2 != 0:
         text += "\n```"
@@ -25,7 +30,7 @@ def sanitize_markdown(text: str) -> str:
     if text.count("**") % 2 != 0:
         text += "**"
     # Fix unclosed italic (single underscore)
-    # Count underscores not inside words
+    # Count only potential formatting underscores
     underscore_count = len(re.findall(r"(?<![\w])_|_(?![\w])", text))
     if underscore_count % 2 != 0:
         text += "_"
