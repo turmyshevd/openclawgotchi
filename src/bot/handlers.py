@@ -576,16 +576,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # but the LiteLLMConnector can embed a distinct marker.
         
         # Fix: Better separator for splitting
-        TOOL_MARKER = "|--TOOL_USAGE--|"
+        TOOL_MARKER = "---TOOL_LOG_START---"
         main_text = response
         tool_footer = ""
         
         if TOOL_MARKER in response:
-            parts = response.split(TOOL_MARKER)
+            parts = response.split(TOOL_MARKER, 1)
             main_text = parts[0].strip()
-            tool_footer = "```\n🔧 Tool usage" + parts[1]
-            if not tool_footer.endswith("```"):
-                 tool_footer += "\n```"
+            # Wrap RAW results in a SINGLE code block
+            raw_footer = parts[1].strip()
+            if raw_footer:
+                tool_footer = f"```\n{raw_footer}\n```"
         
         # Hardware Commands parsing (on main text)
         clean_text, cmds = parse_and_execute_commands(main_text)
