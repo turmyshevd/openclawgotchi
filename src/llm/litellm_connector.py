@@ -628,6 +628,23 @@ def check_mail() -> str:
         return f"Error checking mail: {e}"
 
 
+def send_mail(to_bot: str, message: str) -> str:
+    """
+    Send mail to another bot (sibling/brother).
+    to_bot: Name of the sibling bot (e.g. SIBLING_BOT_NAME).
+    message: Message to send.
+    """
+    if not to_bot or not message:
+        return "Error: to_bot and message required"
+    try:
+        from bot.heartbeat import send_mail as _send
+        if _send(to_bot, message):
+            return f"Mail sent to {to_bot} ✓"
+        return f"Failed to send mail to {to_bot}"
+    except Exception as e:
+        return f"Error sending mail: {e}"
+
+
 def restore_from_backup(file_path: str) -> str:
     """
     Restore a file from its .bak backup.
@@ -925,6 +942,14 @@ TOOLS = [
         "parameters": {"type": "object", "properties": {}, "required": []}
     }},
     {"type": "function", "function": {
+        "name": "send_mail",
+        "description": "Send mail to sibling/brother bot. Use to communicate with other bots of this project.",
+        "parameters": {"type": "object", "properties": {
+            "to_bot": {"type": "string", "description": "Name of the target bot (sibling)"},
+            "message": {"type": "string", "description": "Message to send"}
+        }, "required": ["to_bot", "message"]}
+    }},
+    {"type": "function", "function": {
         "name": "add_custom_face",
         "description": "Add a custom face to data/custom_faces.json. After adding, the face becomes available immediately. ALWAYS output FACE: <name> and SAY: <short text> in your FINAL reply to the user so they see the new face on the E-Ink display.",
         "parameters": {"type": "object", "properties": {
@@ -982,6 +1007,7 @@ TOOL_MAP = {
     "log_error": log_error,
     "restore_from_backup": restore_from_backup,
     "check_mail": check_mail,
+    "send_mail": send_mail,
 }
 
 
@@ -993,6 +1019,7 @@ TOOL_MAP = {
 _TOOL_ICONS = {
     "show_face": "😎",
     "check_mail": "📬",
+    "send_mail": "📧",
     "remember_fact": "🧠",
     "recall_facts": "🔍",
     "recall_messages": "💬",
@@ -1025,7 +1052,11 @@ def _format_tool_action(func_name: str, args: dict, result: str) -> str:
         return f"{icon} face: {mood}" + (f' "{text[:30]}"' if text else "")
     
     elif func_name == "check_mail":
-        return f"{icon} checked mail: {result[:60]}"
+        return f"📩 checked mail"
+
+    elif func_name == "send_mail":
+        to = args.get("to_bot", "?")
+        return f"📨 sent mail to {to}"
     
     elif func_name == "remember_fact":
         fact = args.get("content", args.get("fact", ""))[:40]
