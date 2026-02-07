@@ -1041,9 +1041,9 @@ def _format_tool_action(func_name: str, args: dict, result: str) -> str:
         return f"{icon} read last {n} messages"
     
     elif func_name == "execute_bash":
-        cmd = args.get("command", "")[:40]
+        cmd = args.get("command", "")[:40].replace("`", "'")
         ok = "✓" if "Error" not in result else "✗"
-        return f"{icon} bash: `{cmd}` {ok}"
+        return f"{icon} bash: {cmd} {ok}"
     
     elif func_name == "read_file":
         path = args.get("path", "?").split("/")[-1]
@@ -1055,9 +1055,9 @@ def _format_tool_action(func_name: str, args: dict, result: str) -> str:
         return f"{icon} wrote: {path} {ok}"
     
     elif func_name == "git_command":
-        cmd = args.get("command", "?")[:40]
+        cmd = args.get("command", "?")[:40].replace("`", "'")
         ok = "✓" if "Error" not in result else "✗"
-        return f"{icon} git: `{cmd}` {ok}"
+        return f"{icon} git: {cmd} {ok}"
     
     elif func_name == "health_check":
         return f"{icon} health check"
@@ -1077,25 +1077,24 @@ def _format_tool_action(func_name: str, args: dict, result: str) -> str:
 
 
 def _build_tool_footer(actions: list[str]) -> str:
-    """Build premium tool usage footer for Telegram message."""
+    """Build compact tool usage footer inside a code block."""
     # Skip show_face — it's visual, user sees it on the display
     visible = [a for a in actions if not a.startswith("😎 face:")]
     
     if not visible:
         return ""
     
-    # Premium layout: bold header and bulleted list
-    title = f"🛠️ *Tool usage ({len(visible)}):*"
-    action_lines = []
-    
+    lines = ["```", f"🔧 Tool usage ({len(visible)}):"]
     for action in visible[:8]:  # Max 8 to keep it compact
-        # Use bullets for a professional look
-        action_lines.append(f"• {action}")
+        # Ensure no backticks leak into the code block
+        safe = action.replace("`", "'")
+        lines.append(f"  {safe}")
         
     if len(visible) > 8:
-        action_lines.append(f"• ... +{len(visible) - 8} more")
-        
-    return f"\n{title}\n" + "\n".join(action_lines)
+        lines.append(f"  ... +{len(visible) - 8} more")
+    lines.append("```")
+    
+    return "\n" + "\n".join(lines)
 
 
 # ============================================================
