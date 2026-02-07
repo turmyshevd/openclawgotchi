@@ -570,26 +570,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(response)
             return
         
-        # Split tool usage if present (embedded in response using a marker)
-        # But we decided to return it separately or similar. 
-        # Actually, let's keep the return as (response, connector) for the router,
-        # but the LiteLLMConnector can embed a distinct marker.
-        
-        # Fix: Better separator for splitting
-        TOOL_MARKER = "---TOOL_LOG_START---"
-        main_text = response
-        tool_footer = ""
-        
-        if TOOL_MARKER in response:
-            parts = response.split(TOOL_MARKER, 1)
-            main_text = parts[0].strip()
-            # Wrap RAW results in a SINGLE code block
-            raw_footer = parts[1].strip()
-            if raw_footer:
-                tool_footer = f"```\n{raw_footer}\n```"
-        
-        # Hardware Commands parsing (on main text)
-        clean_text, cmds = parse_and_execute_commands(main_text)
+        # Parse hardware commands
+        clean_text, cmds = parse_and_execute_commands(response)
         
         # Fallback: if LLM didn't include FACE:, show a default face
         if not cmds.get("face"):
@@ -613,7 +595,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 log.error(f"Failed to send mail: {e}")
         
-        # Save response (the full original response, including footer if present)
+        # Save response
         save_message(conv_id, "assistant", response)
         
         # Check if onboarding completed
@@ -640,12 +622,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if connector != "litellm":
             clean_text += "\n\n🧠 Pro"
         
-        # Send main response
+        # Send main response (which now includes tool usage as before)
         await send_long_message(update, clean_text, parse_mode="Markdown" if connector == "litellm" else None)
-        
-        # Send Tool Usage separately
-        if tool_footer:
-            await send_long_message(update, tool_footer, parse_mode="Markdown")
 
         # AWARD XP LAST — Avoid Level Up overwriting the response on E-Ink
         from db.stats import on_message_answered, on_tool_use
