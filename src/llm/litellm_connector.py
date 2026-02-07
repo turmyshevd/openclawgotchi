@@ -256,6 +256,20 @@ STANDARD_FACES = [
     "lonely", "demotivated"
 ]
 
+# Standard face kaomojis for duplicate detection (from gotchi_ui.py default_faces)
+STANDARD_FACES_DICT = {
+    "happy": "(◕‿◕)", "happy2": "(•‿‿•)", "sad": "(╥☁╥ )", "excited": "(ᵔ◡◡ᵔ)",
+    "thinking": "(￣ω￣)", "love": "(♥‿‿♥)", "surprised": "(◉_◉)", "grateful": "(^‿‿^)",
+    "motivated": "(☼‿‿☼)", "bored": "(-__-)", "sleeping": "( -_-)zZ",
+    "sleeping_pwn": "(⇀‿‿↼)", "awakening": "(≖‿‿≖)", "observing": "( ⚆⚆)",
+    "intense": "(°▃▃°)", "cool": "(⌐■_■)", "chill": "(▰˘◡˘▰)", "hype": "(╯°□°）╯",
+    "hacker": "[■_■]", "smart": "(✜‿‿✜)", "broken": "(☓‿‿☓)", "debug": "(#__#)",
+    "angry": "(╬ಠ益ಠ)", "crying": "(ಥ﹏ಥ)", "proud": "(๑•̀ᴗ•́)و", "nervous": "(°△°;)",
+    "confused": "(◎_◎;)", "mischievous": "(◕‿↼)", "wink": "(◕‿◕✿)", "dead": "(✖_✖)",
+    "shock": "(◯△◯)", "suspicious": "(¬_¬)", "smug": "(￣ω￣)", "cheering": "\\(◕◡◕)/",
+    "celebrate": "★(◕‿◕)★", "dizzy": "(⊙๖⊙)", "lonely": "(ب__ب)", "demotivated": "(≖__≖)",
+}
+
 def add_custom_face(name: str, kaomoji: str) -> str:
     """
     Add a custom face/mood to the collection. Bot can add its own faces!
@@ -301,6 +315,11 @@ def add_custom_face(name: str, kaomoji: str) -> str:
         for existing_name, existing_kaomoji in custom_faces.items():
             if existing_kaomoji == kaomoji:
                 return f"Error: This kaomoji {kaomoji} is already registered as '{existing_name}'. Please use the existing name instead of creating a duplicate."
+
+        # 3. Check if this kaomoji is already a standard face
+        for std_name, std_kaomoji in STANDARD_FACES_DICT.items():
+            if std_kaomoji == kaomoji:
+                return f"Error: This kaomoji {kaomoji} is already a standard face called '{std_name}'. Please use FACE: {std_name} instead of creating a duplicate."
 
         # Add new face
         custom_faces[name] = kaomoji
