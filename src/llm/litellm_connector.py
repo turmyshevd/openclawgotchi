@@ -1273,6 +1273,7 @@ class LiteLLMConnector(LLMConnector):
                     from llm.rate_limits import clear_limit
                     clear_limit("litellm")
                     
+                    final = msg.content or "(empty response)"
                     # Build tool usage footer
                     footer = _build_tool_footer(tool_actions) if tool_actions else ""
                     # Use a distinct long separator that's unlikely to appear in normal text
