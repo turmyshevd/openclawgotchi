@@ -1094,7 +1094,7 @@ def _build_tool_footer(actions: list[str]) -> str:
         lines.append(f"  ... +{len(visible) - 8} more")
     lines.append("```")
     
-    return "\n" + "\n".join(lines)
+    return "\n".join(lines)
 
 
 # ============================================================
@@ -1273,14 +1273,12 @@ class LiteLLMConnector(LLMConnector):
                     from llm.rate_limits import clear_limit
                     clear_limit("litellm")
                     
-                    final = msg.content or "(empty response)"
-                    
-                    # Append tool usage summary if any tools were called
-                    if tool_actions:
-                        footer = _build_tool_footer(tool_actions)
-                        final = f"{final}\n\n{footer}"
-                    
-                    return final
+                    # Build tool usage footer
+                    footer = _build_tool_footer(tool_actions) if tool_actions else ""
+                    # Use a distinct long separator that's unlikely to appear in normal text
+                    SEPARATOR = "\n\n|--TOOL_USAGE--|\n"
+                    final_content = final + (SEPARATOR + footer if footer else "")
+                    return final_content
                     
             except Exception as e:
                 err_str = str(e)
