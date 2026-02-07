@@ -2,16 +2,33 @@
 LiteLLM connector — full-featured fallback with tools.
 """
 
+import contextvars
 import json
 import logging
 import subprocess
 from pathlib import Path
 from typing import Optional
 
-from config import PROJECT_DIR, WORKSPACE_DIR
+from config import PROJECT_DIR, WORKSPACE_DIR, ENABLE_LITELLM_TOOLS
 from llm.base import LLMConnector, LLMError
 
 log = logging.getLogger(__name__)
+
+# Chat ID to use for one-shot cron reminders (per-task context, set by handler before LLM call)
+_cron_target_chat_id: contextvars.ContextVar[Optional[int]] = contextvars.ContextVar(
+    "cron_target_chat_id", default=None
+)
+
+
+def set_cron_target_chat_id(chat_id: Optional[int]) -> None:
+    """Set chat ID for next add_scheduled_task (so reminder goes to same chat)."""
+    _cron_target_chat_id.set(chat_id)
+
+
+def _get_cron_target_chat_id() -> Optional[int]:
+    """Get chat ID for next add_scheduled_task (per-task context)."""
+    return _cron_target_chat_id.get()
+
 
 # Note: LiteLLM is imported lazily inside LiteLLMConnector.call to save RAM on Pi Zero 2W.
 LITELLM_AVAILABLE = True # Assume available, will fail at runtime if not
@@ -41,6 +58,8 @@ PROTECTED_FILES = [
     ".env",
     "gotchi.db",
     "src/drivers/",  # Hardware drivers
+    "src/ui/",       # E-Ink UI (critical display stack)
+    "src/ui/gotchi_ui.py",
 ]
 
 # Max file size for write (100KB)
@@ -263,7 +282,7 @@ def add_custom_face(name: str, kaomoji: str) -> str:
         # Save
         CUSTOM_FACES_PATH.write_text(json.dumps(custom_faces, indent=2, ensure_ascii=False))
         
-        return f"✓ Added custom face '{name}': {kaomoji}. Use FACE: {name} to show it!"
+        return f"✓ Added custom face '{name}': {kaomoji}. Call show_face(mood='{name}', text='') to display it, or output FACE: {name} and SAY: <text> in your reply."
     except Exception as e:
         return f"Error: {e}"
 
@@ -446,20 +465,31 @@ def recall_messages(limit: int = 20) -> str:
         return f"Error reading messages: {e}"
 
 
-def add_scheduled_task(name: str, interval_minutes: int = 0, run_in_minutes: int = 0, message: str = "") -> str:
-    """Add a scheduled/cron task."""
+def add_scheduled_task(name: str, interval_minutes: int = 0, run_in_minutes: int = 0, run_in_seconds: int = 0, message: str = "") -> str:
+    """Add a scheduled/cron task. Use run_in_seconds for short delays (e.g. 15), run_in_minutes for minutes."""
     try:
         from cron.scheduler import add_cron_job
+        target_chat = _get_cron_target_chat_id() or 0
         
+        if run_in_seconds > 0:
+            job = add_cron_job(
+                name=name,
+                message=message,
+                run_at=f"{run_in_seconds}s",
+                delete_after_run=True,
+                target_chat_id=target_chat
+            )
+            return f"One-shot task added: '{name}' in {run_in_seconds}s (ID: {job.id}). To remove: remove_scheduled_task(job_id='{job.id}')"
         if run_in_minutes > 0:
-            # One-shot
+            # One-shot (minutes; supports float e.g. 0.25 = 15 sec)
             job = add_cron_job(
                 name=name,
                 message=message,
                 run_at=f"{run_in_minutes}m",
-                delete_after_run=True
+                delete_after_run=True,
+                target_chat_id=target_chat
             )
-            return f"One-shot task added: '{name}' in {run_in_minutes}m (ID: {job.id})"
+            return f"One-shot task added: '{name}' in {run_in_minutes}m (ID: {job.id}). To remove: remove_scheduled_task(job_id='{job.id}')"
         elif interval_minutes > 0:
             # Recurring
             job = add_cron_job(
@@ -467,23 +497,23 @@ def add_scheduled_task(name: str, interval_minutes: int = 0, run_in_minutes: int
                 message=message,
                 interval_minutes=interval_minutes
             )
-            return f"Recurring task added: '{name}' every {interval_minutes}m (ID: {job.id})"
+            return f"Recurring task added: '{name}' every {interval_minutes}m (ID: {job.id}). To remove: remove_scheduled_task(job_id='{job.id}')"
         else:
-            return "Error: specify interval_minutes (recurring) or run_in_minutes (one-shot)"
+            return "Error: specify run_in_seconds (e.g. 15), run_in_minutes (e.g. 1 or 0.25), or interval_minutes (recurring)"
     except Exception as e:
         return f"Error: {e}"
 
 
 def list_scheduled_tasks() -> str:
-    """List all scheduled tasks."""
+    """List all scheduled tasks. Use job_id or task name with remove_scheduled_task to remove."""
     try:
         from cron.scheduler import list_cron_jobs
         jobs = list_cron_jobs()
         
         if not jobs:
-            return "No scheduled tasks."
+            return "Scheduled tasks (0). No tasks in scheduler. Add with add_scheduled_task(interval_minutes=... or run_in_minutes=...)."
         
-        lines = []
+        lines = [f"Scheduled tasks ({len(jobs)}):"]
         for job in jobs:
             status = "✓" if job.enabled else "✗"
             if job.interval_minutes:
@@ -492,8 +522,9 @@ def list_scheduled_tasks() -> str:
                 schedule = f"at {job.run_at[:16]}"
             else:
                 schedule = "?"
-            lines.append(f"{status} {job.name} ({job.id}) — {schedule}, runs: {job.run_count}")
-        
+            # job_id first so bot/user can copy; name also works for remove_scheduled_task
+            lines.append(f"  job_id='{job.id}' | {status} {job.name} | {schedule} | runs: {job.run_count}")
+        lines.append("Remove: remove_scheduled_task(job_id='<id>') or remove_scheduled_task(job_id='<name>').")
         return "\n".join(lines)
     except Exception as e:
         return f"Error: {e}"
@@ -523,6 +554,37 @@ def health_check() -> str:
         return result.stdout + (f"\n{result.stderr}" if result.stderr else "")
     except Exception as e:
         return f"Error running health check: {e}"
+
+
+# Max lines to keep in ERROR_LOG.md so we don't fill disk on Pi
+ERROR_LOG_MAX_LINES = 300
+
+
+def log_error(message: str) -> str:
+    """
+    Append a critical error to data/ERROR_LOG.md (timestamped).
+    Use when: display failed, service down, health_check found problems, restart failed, or user reports something broken.
+    Keeps only last ERROR_LOG_MAX_LINES so disk doesn't fill. You can read_file('data/ERROR_LOG.md') to see recent errors.
+    """
+    if not message or not message.strip():
+        return "Error: message required"
+    try:
+        from datetime import datetime
+        from config import DATA_DIR
+        log_path = DATA_DIR / "ERROR_LOG.md"
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        line = f"[{datetime.now().isoformat()}] ERROR: {message.strip()}\n"
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(line)
+        # Trim to last N lines so log doesn't grow unbounded on Pi
+        with open(log_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        if len(lines) > ERROR_LOG_MAX_LINES:
+            with open(log_path, "w", encoding="utf-8") as f:
+                f.writelines(lines[-ERROR_LOG_MAX_LINES:])
+        return f"Logged to {log_path.name}"
+    except Exception as e:
+        return f"Error writing log: {e}"
 
 
 def check_mail() -> str:
@@ -792,11 +854,12 @@ TOOLS = [
     }},
     {"type": "function", "function": {
         "name": "add_scheduled_task",
-        "description": "Add a scheduled task (cron). Use interval_minutes for recurring, run_in_minutes for one-shot.",
+        "description": "Add a scheduled task. Use run_in_seconds for short delay (e.g. 15), run_in_minutes for minutes, interval_minutes for recurring.",
         "parameters": {"type": "object", "properties": {
             "name": {"type": "string", "description": "Task name"},
             "interval_minutes": {"type": "integer", "description": "Run every N minutes (recurring)"},
-            "run_in_minutes": {"type": "integer", "description": "Run once in N minutes (one-shot)"},
+            "run_in_minutes": {"type": "number", "description": "Run once in N minutes (one-shot). Can use 0.25 for 15 sec."},
+            "run_in_seconds": {"type": "integer", "description": "Run once in N seconds (one-shot). Use this for 15, 30, etc."},
             "message": {"type": "string", "description": "What to do when task runs"}
         }, "required": ["name"]}
     }},
@@ -807,15 +870,22 @@ TOOLS = [
     }},
     {"type": "function", "function": {
         "name": "remove_scheduled_task",
-        "description": "Remove a scheduled task by ID",
+        "description": "Remove a scheduled task. Use job_id (first column in list_scheduled_tasks) or the task name (e.g. 'heartbeat-every-5m').",
         "parameters": {"type": "object", "properties": {
-            "job_id": {"type": "string", "description": "Task ID to remove"}
+            "job_id": {"type": "string", "description": "Task ID (e.g. 'a1b2c3d4') or task name (e.g. 'heartbeat-every-5m') from list_scheduled_tasks"}
         }, "required": ["job_id"]}
     }},
     {"type": "function", "function": {
         "name": "health_check",
         "description": "Run system health check. Use to diagnose problems! Checks internet, disk, temp, service, errors.",
         "parameters": {"type": "object", "properties": {}, "required": []}
+    }},
+    {"type": "function", "function": {
+        "name": "log_error",
+        "description": "Append a critical error to data/ERROR_LOG.md (timestamped). Use when: display failed, service down, health_check found problems, restart failed, or user reports something broken. Then you can read_file('data/ERROR_LOG.md') later to see what went wrong.",
+        "parameters": {"type": "object", "properties": {
+            "message": {"type": "string", "description": "Short description of what failed (e.g. 'Display GPIO busy', 'health_check: disk >90%')"}
+        }, "required": ["message"]}
     }},
     {"type": "function", "function": {
         "name": "restore_from_backup",
@@ -833,13 +903,13 @@ TOOLS = [
         "name": "show_face",
         "description": "Show a face/mood on the E-Ink display. Optionally add text (speech bubble or status).",
         "parameters": {"type": "object", "properties": {
-            "mood": {"type": "string", "description": "Face mood: happy, sad, excited, thinking, love, surprised, bored, sleeping, hacker, proud, nervous, confused, mischievous, cool, wink, dead, shock, celebrate, cheering"},
+            "mood": {"type": "string", "description": "Face mood: happy, sad, excited, thinking, love, surprised, bored, sleeping, hacker, proud, nervous, confused, mischievous, cool, chill, hype, wink, dead, shock, celebrate, cheering"},
             "text": {"type": "string", "description": "Optional status text or SAY:text for speech bubble (max 60 chars)"}
         }, "required": ["mood"]}
     }},
     {"type": "function", "function": {
         "name": "add_custom_face",
-        "description": "Add a custom face/mood to the E-Ink display collection. Bot can add its own faces! Use Unicode kaomoji like (◕‿◕), (⌐■_■), etc. Name should be lowercase, no spaces (use underscore).",
+        "description": "Add a custom face to data/custom_faces.json. After adding, you MUST call show_face(mood=name, text='...') in the same turn so the user sees it on the E-Ink. Do NOT say reboot or reload is needed — the face is available immediately. Always output FACE: <name> and SAY: <short text> in your reply.",
         "parameters": {"type": "object", "properties": {
             "name": {"type": "string", "description": "Mood name (lowercase, no spaces, e.g. 'zen', 'determined', 'focused')"},
             "kaomoji": {"type": "string", "description": "Unicode kaomoji string (max 20 chars, e.g. '(◕‿◕)', '(⌐■_■)', '(°▃▃°)')"}
@@ -893,6 +963,7 @@ TOOL_MAP = {
     "list_scheduled_tasks": list_scheduled_tasks,
     "remove_scheduled_task": remove_scheduled_task,
     "health_check": health_check,
+    "log_error": log_error,
     "restore_from_backup": restore_from_backup,
     "check_mail": check_mail,
 }
@@ -916,6 +987,7 @@ _TOOL_ICONS = {
     "log_change": "📋",
     "git_command": "📦",
     "health_check": "🏥",
+    "log_error": "📋",
     "safe_restart": "🔄",
     "manage_service": "🔧",
     "add_custom_face": "🎨",
@@ -972,7 +1044,11 @@ def _format_tool_action(func_name: str, args: dict, result: str) -> str:
     
     elif func_name == "health_check":
         return f"{icon} health check"
-    
+
+    elif func_name == "log_error":
+        msg = (args.get("message") or "?")[:30]
+        return f"{icon} error log: {msg}"
+
     elif func_name == "safe_restart":
         return f"{icon} restart"
     
@@ -993,7 +1069,9 @@ def _build_tool_footer(actions: list[str]) -> str:
     
     lines = ["```", f"🔧 Tool usage ({len(visible)}):"]
     for action in visible[:8]:  # Max 8 to keep it compact
-        lines.append(f"  {action}")
+        # Avoid breaking markdown: no backticks inside the ``` block
+        safe = (action or "").replace("`", "'")
+        lines.append(f"  {safe}")
     if len(visible) > 8:
         lines.append(f"  ... +{len(visible) - 8} more")
     lines.append("```")
@@ -1054,6 +1132,11 @@ class LiteLLMConnector(LLMConnector):
         
         # System prompt (includes stats via build_system_context)
         sys_content = system_prompt or self._load_system_prompt(prompt)
+        # Inject conversation context: summary + last 5 messages so the model remembers the thread
+        from llm.prompts import build_conversation_context
+        conv_context = build_conversation_context(history)
+        if conv_context:
+            sys_content = sys_content + "\n\n---\n" + conv_context
         messages.append({"role": "system", "content": sys_content})
         
         # History
@@ -1080,10 +1163,13 @@ class LiteLLMConnector(LLMConnector):
                 kwargs = {
                     "model": self.model,
                     "messages": messages,
-                    "tools": TOOLS,
-                    "tool_choice": "auto",
                     "timeout": 120,
                 }
+                if ENABLE_LITELLM_TOOLS:
+                    kwargs["tools"] = TOOLS
+                    kwargs["tool_choice"] = "auto"
+                else:
+                    kwargs["tool_choice"] = "none"
                 
                 # Use instance api_base if set, otherwise potentially fall back to env or default
                 if self.api_base:

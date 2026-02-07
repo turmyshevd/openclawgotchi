@@ -212,3 +212,63 @@ def build_history_prompt(history: list[dict]) -> str:
         lines.append(f"{role}: {content}")
     
     return "\n".join(lines)
+
+
+# How many recent messages to always show in conversation context
+CONVERSATION_LAST_N = 5
+
+
+def build_conversation_context(history: list[dict]) -> str:
+    """
+    Build a short "where we are" block for the system prompt:
+    - Summary of what was discussed (before the last N messages)
+    - Last N messages (user + assistant), including tool usage when present.
+
+    "System" messages here = the single [Earlier: ...] summary injected by optimize_history.
+    We skip that in the "last 5" list because we already show "Summary so far" above.
+    Assistant messages often end with "Tool usage (N): ..." — we keep a longer preview so
+    that tool usage is visible (useful context for the next turn).
+    """
+    # Only user/assistant for "recent" list (skip the one system msg = [Earlier: ...] summary)
+    chat_turns = [m for m in history if m.get("role") in ("user", "assistant")]
+    if not chat_turns:
+        return ""
+    
+    try:
+        from memory.summarize import summarize_old_messages
+    except Exception:
+        return ""
+    
+    last_n = CONVERSATION_LAST_N
+    if len(chat_turns) <= last_n:
+        summary_line = "Beginning of conversation."
+        recent = chat_turns
+    else:
+        old_part = chat_turns[:-last_n]
+        summary_line = summarize_old_messages(old_part)
+        if not summary_line:
+            summary_line = "Earlier messages in this chat."
+        recent = chat_turns[-last_n:]
+    
+    # Preview length: longer for assistant so "Tool usage (N):" footer is usually included
+    PREVIEW_USER = 200
+    PREVIEW_ASSISTANT = 450  # enough for main reply + "Tool usage (1): add_scheduled_task(...)"
+    
+    lines = [
+        "## Current conversation context",
+        "",
+        "**Summary so far:** " + (summary_line if summary_line.startswith("[") else summary_line),
+        "",
+        f"**Last {len(recent)} messages (most recent):**"
+    ]
+    for msg in recent:
+        role = "User" if msg.get("role") == "user" else "Assistant"
+        content = (msg.get("content") or "").strip()
+        if role == "Assistant" and content.startswith("[Earlier:"):
+            lines.append(f"- {role}: (summary of earlier turns)")
+        else:
+            cap = PREVIEW_ASSISTANT if role == "Assistant" else PREVIEW_USER
+            preview = content[:cap] + ("..." if len(content) > cap else "")
+            lines.append(f"- {role}: {preview}")
+    
+    return "\n".join(lines)

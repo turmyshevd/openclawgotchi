@@ -7,7 +7,7 @@ import logging
 from telegram import Update
 from telegram.error import BadRequest
 
-from config import get_allowed_users, get_allowed_groups, TELEGRAM_MSG_LIMIT
+from config import get_allowed_users, get_allowed_groups, TELEGRAM_MSG_LIMIT, ALLOW_ALL_USERS
 
 log = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ def is_allowed(user_id: int, chat_id: int = None) -> bool:
     
     allowed_users = get_allowed_users()
     if not allowed_users:
-        return True
+        return bool(ALLOW_ALL_USERS)
     
     return user_id in allowed_users
 

@@ -98,6 +98,8 @@ def _load_all_faces() -> dict:
         "observing":    "( ⚆⚆)",
         "intense":      "(°▃▃°)",
         "cool":         "(⌐■_■)",
+        "chill":        "(▰˘◡˘▰)",
+        "hype":         "(╯°□°）╯",
         "hacker":       "[■_■]",
         "smart":        "(✜‿‿✜)",
         "broken":       "(☓‿‿☓)",
@@ -141,7 +143,9 @@ def render_ui(mood="happy", status_text="", fast_mode=True):
     stats = get_system_stats()
     
     # Init Display
+    import epdconfig
     epd = epd_driver.EPD()
+    gpio_released = False
     try:
         if fast_mode:
             epd.init()
@@ -455,11 +459,45 @@ def render_ui(mood="happy", status_text="", fast_mode=True):
             epd.display(epd.getbuffer(rotated_image))
 
         epd.sleep()
-        
+        gpio_released = True
+        global _display_gpio_released
+        _display_gpio_released = True
+
     except Exception as e:
         print(f"Render Error: {e}")
         import traceback
         traceback.print_exc()
+    finally:
+        if not gpio_released:
+            try:
+                epdconfig.module_exit(cleanup=True)
+            except Exception:
+                pass
+
+# Set to True when render_ui() successfully called epd.sleep() (GPIO already released)
+_display_gpio_released = False
+
+
+# Keep only last N lines so we don't fill disk on Pi
+_DISPLAY_ERROR_LOG_MAX_LINES = 200
+
+
+def _log_display_error(msg: str):
+    """Write error to data/display_error.log so we can see why E-Ink failed. Trims to last N lines."""
+    try:
+        log_dir = PROJECT_DIR / "data"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / "display_error.log"
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(f"{datetime.datetime.now().isoformat()} {msg}\n")
+        with open(log_file, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        if len(lines) > _DISPLAY_ERROR_LOG_MAX_LINES:
+            with open(log_file, "w", encoding="utf-8") as f:
+                f.writelines(lines[-_DISPLAY_ERROR_LOG_MAX_LINES:])
+    except Exception:
+        pass
+
 
 if __name__ == "__main__":
     import argparse
@@ -468,5 +506,21 @@ if __name__ == "__main__":
     parser.add_argument("--text", default="", help="Status text line")
     parser.add_argument("--full", action="store_true", help="Force full refresh")
     args = parser.parse_args()
-    
-    render_ui(mood=args.mood, status_text=args.text, fast_mode=not args.full)
+
+    try:
+        render_ui(mood=args.mood, status_text=args.text, fast_mode=not args.full)
+    except Exception as e:
+        import traceback
+        err = traceback.format_exc()
+        print(f"Display error: {e}", file=sys.stderr)
+        traceback.print_exc()
+        _log_display_error(f"FAIL: {e}\n{err}")
+        sys.exit(1)
+    finally:
+        # If we crashed before/during render_ui, GPIO was claimed at import; release it.
+        if not _display_gpio_released:
+            try:
+                import epdconfig
+                epdconfig.module_exit(cleanup=True)
+            except Exception:
+                pass

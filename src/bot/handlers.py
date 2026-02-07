@@ -59,7 +59,9 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"/xp — XP rules & progress\n"
         f"/context — view/trim context window\n"
         f"/clear — wipe conversation history\n"
-        f"/pro — toggle Lite/Pro mode\n"
+        f"/pro — switch to Pro mode\n"
+        f"/lite — switch to Lite mode\n"
+        f"/mode — toggle Lite/Pro mode\n"
         f"/memory — database stats\n\n"
         f"*Memory:*\n"
         f"/remember <cat> <fact> — save fact\n"
@@ -67,7 +69,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"*Automation:*\n"
         f"/cron <name> <min> <msg> — schedule task\n"
         f"/jobs — list/remove tasks"
-    )
+    , parse_mode="Markdown")
 
 
 async def cmd_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -257,7 +259,7 @@ async def cmd_xp(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def cmd_pro(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /pro command — toggle between Lite and Pro."""
+    """Handle /pro, /lite, /mode — toggle or set Lite/Pro."""
     user = update.effective_user
     chat = update.effective_chat
     
@@ -265,7 +267,31 @@ async def cmd_pro(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     router = get_router()
-    is_lite = router.toggle_lite_mode()
+    # Detect explicit mode requests (so /lite doesn't toggle)
+    cmd_text = ""
+    if update.message and update.message.text:
+        cmd_text = update.message.text.split()[0].lower()
+    requested = None
+    if cmd_text == "/lite":
+        requested = "lite"
+    elif cmd_text == "/pro":
+        requested = "pro"
+    elif cmd_text == "/mode" and context.args:
+        arg = context.args[0].lower()
+        if arg in ("lite", "pro"):
+            requested = arg
+
+    if requested == "lite":
+        if not router.force_lite:
+            router.force_lite = True
+        is_lite = True
+    elif requested == "pro":
+        if router.force_lite:
+            router.force_lite = False
+        is_lite = False
+    else:
+        # Default: toggle for /mode (no args) or legacy usage
+        is_lite = router.toggle_lite_mode()
     
     if is_lite:
         show_face("cool", "SAY: Fast & Free! | MODE: L | STATUS: Lite Mode")
@@ -370,7 +396,8 @@ async def cmd_cron(update: Update, context: ContextTypes.DEFAULT_TYPE):
             name=name,
             message=message,
             run_at=interval_str,
-            delete_after_run=True
+            delete_after_run=True,
+            target_chat_id=chat.id
         )
         await update.message.reply_text(
             f"⏰ One-shot job added: {name}\n"
@@ -388,7 +415,8 @@ async def cmd_cron(update: Update, context: ContextTypes.DEFAULT_TYPE):
         job = add_cron_job(
             name=name,
             message=message,
-            interval_minutes=minutes
+            interval_minutes=minutes,
+            target_chat_id=chat.id
         )
         await update.message.reply_text(
             f"⏰ Cron job added: {name}\n"
@@ -508,6 +536,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if history:
         history = history[:-1]
     
+    # Check if memory flush needed (use full history length, before optimization)
+    flush_prompt = check_and_inject_flush(history)
+
     # Optimize history for context window
     history = optimize_history(history)
     
@@ -518,13 +549,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_text = bootstrap_prompt + " [USER]: " + user_text
         log.info("Onboarding mode active")
     
-    # Check if memory flush needed
-    flush_prompt = check_and_inject_flush(history)
     if flush_prompt:
         # Prepend flush reminder to user message
         user_text = user_text + flush_prompt
     
-    # Call LLM
+    # Call LLM (set cron target so one-shot reminders go to this chat)
+    from llm import litellm_connector
+    litellm_connector.set_cron_target_chat_id(conv_id)
     router = get_router()
     
     try:
@@ -635,6 +666,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         from audit_logging.command_logger import log_error
         log_error("unexpected", str(e), {"chat_id": conv_id})
+    finally:
+        litellm_connector.set_cron_target_chat_id(None)
 
 async def cmd_use(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Switch LLM model (Gemini <-> GLM)."""

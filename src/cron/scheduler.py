@@ -37,7 +37,8 @@ class CronJob:
     # Options
     enabled: bool = True
     session: str = "main"           # "main" or "isolated"
-    delete_after_run: bool = False  # For one-shot jobs
+    delete_after_run: bool = False   # For one-shot jobs
+    target_chat_id: int = 0         # Send reminder to this chat (0 = use admin_id)
     
     # State
     last_run: str = ""
@@ -88,24 +89,33 @@ class CronScheduler:
     
     def add_job(self, job: CronJob) -> CronJob:
         """Add a new job."""
+        now = datetime.now()
         # Calculate next run
         if job.interval_minutes > 0:
-            job.next_run = (datetime.now() + timedelta(minutes=job.interval_minutes)).isoformat()
+            job.next_run = (now + timedelta(minutes=job.interval_minutes)).isoformat()
         elif job.run_at:
             job.next_run = job.run_at
         
         self.jobs[job.id] = job
         self._save_jobs()
         log.info(f"Added cron job: {job.name} ({job.id})")
+        if job.delete_after_run and job.next_run:
+            log.info(f"One-shot scheduled: next_run={job.next_run!r} (now={now.isoformat()!r})")
         return job
     
-    def remove_job(self, job_id: str) -> bool:
-        """Remove a job."""
-        if job_id in self.jobs:
-            del self.jobs[job_id]
+    def remove_job(self, job_id_or_name: str) -> bool:
+        """Remove a job by id or by name."""
+        if job_id_or_name in self.jobs:
+            del self.jobs[job_id_or_name]
             self._save_jobs()
-            log.info(f"Removed cron job: {job_id}")
+            log.info(f"Removed cron job: {job_id_or_name}")
             return True
+        for jid, job in list(self.jobs.items()):
+            if job.name == job_id_or_name:
+                del self.jobs[jid]
+                self._save_jobs()
+                log.info(f"Removed cron job by name: {job.name} ({jid})")
+                return True
         return False
     
     def get_job(self, job_id: str) -> Optional[CronJob]:
@@ -133,7 +143,8 @@ class CronScheduler:
             
             try:
                 next_run = datetime.fromisoformat(job.next_run)
-            except ValueError:
+            except (ValueError, TypeError) as e:
+                log.warning(f"Cron job {job.name} ({job.id}): invalid next_run {job.next_run!r}: {e}")
                 continue
             
             if now >= next_run:
@@ -172,8 +183,8 @@ class CronScheduler:
             except Exception as e:
                 log.error(f"Scheduler error: {e}")
             
-            # Check every minute
-            await asyncio.sleep(60)
+            # Check every 30s so one-shot reminders run within ~30s of due time
+            await asyncio.sleep(30)
     
     def start(self):
         """Start the scheduler."""
@@ -214,7 +225,8 @@ def add_cron_job(
     message: str = "",
     interval_minutes: int = 0,
     run_at: str = "",
-    delete_after_run: bool = False
+    delete_after_run: bool = False,
+    target_chat_id: int = 0
 ) -> CronJob:
     """
     Add a cron job.
@@ -228,14 +240,18 @@ def add_cron_job(
     """
     import uuid
     
-    # Parse run_at shortcuts
+    # Parse run_at shortcuts (e.g. "15s", "2m", "0.25m", "1h")
     if run_at:
-        if run_at.endswith("m"):
-            minutes = int(run_at[:-1])
-            run_at = (datetime.now() + timedelta(minutes=minutes)).isoformat()
+        now = datetime.now()
+        if run_at.endswith("s"):
+            sec = int(run_at[:-1])
+            run_at = (now + timedelta(seconds=sec)).isoformat()
+        elif run_at.endswith("m"):
+            minutes = float(run_at[:-1])
+            run_at = (now + timedelta(minutes=minutes)).isoformat()
         elif run_at.endswith("h"):
-            hours = int(run_at[:-1])
-            run_at = (datetime.now() + timedelta(hours=hours)).isoformat()
+            hours = float(run_at[:-1])
+            run_at = (now + timedelta(hours=hours)).isoformat()
     
     job = CronJob(
         id=str(uuid.uuid4())[:8],
@@ -244,6 +260,7 @@ def add_cron_job(
         interval_minutes=interval_minutes,
         run_at=run_at,
         delete_after_run=delete_after_run,
+        target_chat_id=target_chat_id,
     )
     
     return get_scheduler().add_job(job)

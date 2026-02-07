@@ -4,6 +4,7 @@ Sets face based on system state: temp, RAM, uptime, time of day.
 """
 
 import logging
+import re
 from datetime import datetime
 from typing import Optional
 
@@ -37,8 +38,9 @@ def get_auto_mood() -> tuple[str, str]:
     
     # Parse values
     try:
-        temp = float(stats.temp.replace('°C', '').strip())
-    except:
+        temp_match = re.search(r"(-?\d+(?:\.\d+)?)", str(stats.temp))
+        temp = float(temp_match.group(1)) if temp_match else 45.0
+    except Exception:
         temp = 45.0
     
     try:

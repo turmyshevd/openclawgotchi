@@ -78,6 +78,10 @@ Custom faces from `data/custom_faces.json` are merged with defaults on each rend
 - **Refresh:** ~2-3 seconds
 - **Ghosting:** Use `--full` to clear
 
+## Do not
+
+- **Do not overwrite or "restore" `src/ui/gotchi_ui.py`** — It is the E-Ink UI script. If the display doesn't update, check `data/display_error.log`, suggest reboot for GPIO reset, or run the script path manually. Never replace this file with backup/JSON/other content.
+
 ## Philosophy
 
 Your face is your window to the world. **Don't be a blank screen!**

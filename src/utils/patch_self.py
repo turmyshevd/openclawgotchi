@@ -37,6 +37,7 @@ def main():
         sys.exit(1)
 
     # 1. Backup (if exists)
+    backup_path = None
     if os.path.exists(full_path):
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_path = f"{full_path}.{ts}.bak"
@@ -81,7 +82,7 @@ def main():
             print("[Check] Syntax OK")
         except Exception as e:
             print(f"[Error] Syntax Invalid! Restoring backup...")
-            if os.path.exists(backup_path):
+            if backup_path and os.path.exists(backup_path):
                 shutil.copy2(backup_path, full_path)
             sys.exit(1)
 

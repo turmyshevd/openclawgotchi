@@ -25,20 +25,45 @@ def main():
 
     # 2. Disk Space
     ok, out = check("Disk", "df -h / | tail -1")
-    used_pct = int(out.split()[-2].replace("%", ""))
-    if used_pct < 90:
-        print(f"[✅] Disk: {used_pct}% used")
+    if ok:
+        try:
+            used_pct = int(out.split()[-2].replace("%", ""))
+            if used_pct < 90:
+                print(f"[✅] Disk: {used_pct}% used")
+            else:
+                print(f"[⚠️] Disk: {used_pct}% used (CRITICAL)")
+                all_ok = False
+        except Exception:
+            print(f"[❌] Disk: Failed to parse df output\n{out}")
+            all_ok = False
     else:
-        print(f"[⚠️] Disk: {used_pct}% used (CRITICAL)")
+        print(f"[❌] Disk: FAIL\n{out}")
         all_ok = False
 
     # 3. Temperature
     ok, out = check("Temp", "vcgencmd measure_temp")
-    temp = float(out.replace("temp=", "").replace("'C", ""))
-    if temp < 70:
-        print(f"[✅] Temp: {temp}°C")
+    if not ok:
+        # Fallback for non-vcgencmd environments
+        ok, out = check("Temp", "cat /sys/class/thermal/thermal_zone0/temp")
+        if ok:
+            try:
+                temp = float(out.strip()) / 1000
+                out = f"{temp}°C"
+            except Exception:
+                ok = False
+    if ok:
+        try:
+            temp = float(out.replace("temp=", "").replace("'C", "").replace("°C", "").strip())
+            if temp < 70:
+                print(f"[✅] Temp: {temp}°C")
+            else:
+                print(f"[⚠️] Temp: {temp}°C (HOT)")
+                all_ok = False
+        except Exception:
+            print(f"[❌] Temp: Failed to parse temperature\n{out}")
+            all_ok = False
     else:
-        print(f"[⚠️] Temp: {temp}°C (HOT)")
+        print(f"[⚠️] Temp: Unavailable")
         all_ok = False
 
     # 4. Service Status

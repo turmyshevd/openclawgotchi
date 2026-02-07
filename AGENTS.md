@@ -71,6 +71,7 @@ openclawgotchi/
 - **No heavy processes** — 512MB RAM limit
 - **`trash` > `rm`** — Recoverable deletes
 - **Ask before external actions** — Network, installs
+- **Do not overwrite or "restore" critical display code** — `src/ui/gotchi_ui.py` and `src/drivers/` are the E-Ink stack. Never replace them with backups or write JSON/other content into them. If the display fails, check `data/display_error.log` and GPIO/reboot, don't rewrite the UI script.
 
 ## Key Files
 

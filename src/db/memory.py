@@ -84,6 +84,19 @@ def init_db():
             read_at TEXT
         )
     """)
+    # Migration: brother bot or scripts may expect "sender" column (alias for from_bot)
+    for table in ("bot_mail", "botmail"):
+        try:
+            cursor = conn.cursor()
+            cursor.execute(f"PRAGMA table_info({table})")
+            columns = [row[1] for row in cursor.fetchall()]
+            if columns and "sender" not in columns:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN sender TEXT")
+                if "from_bot" in columns:
+                    conn.execute(f"UPDATE {table} SET sender = from_bot WHERE sender IS NULL")
+                conn.commit()
+        except Exception:
+            pass
     
     conn.commit()
     conn.close()
@@ -172,7 +185,7 @@ def search_facts(query: str, limit: int = 5) -> list[dict]:
     conn = get_connection()
     try:
         rows = conn.execute(
-            "SELECT content, category, timestamp FROM facts WHERE content MATCH ? ORDER BY rank LIMIT ?",
+            "SELECT content, category, timestamp FROM facts WHERE facts MATCH ? ORDER BY bm25(facts) LIMIT ?",
             (query, limit),
         ).fetchall()
     except sqlite3.OperationalError:

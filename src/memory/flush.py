@@ -8,6 +8,7 @@ Includes LLM-powered conversation summarization for heartbeat.
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 from config import WORKSPACE_DIR, HISTORY_LIMIT
 
@@ -108,7 +109,7 @@ Conversation:
 Summary (bullet points only):"""
 
 
-async def summarize_conversation_with_llm(history: list[dict], chat_id: int = 0) -> str | None:
+async def summarize_conversation_with_llm(history: list[dict], chat_id: int = 0) -> Optional[str]:
     """
     Use LLM to create a brief summary of conversation.
     Called during heartbeat, not in main message flow.

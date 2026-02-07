@@ -4,13 +4,14 @@ Heartbeat — periodic tasks, auto-mood, XP, bot_mail, reflection.
 
 import logging
 import os
+import re
 import sqlite3
 from pathlib import Path
+from typing import Optional
 
-from config import WORKSPACE_DIR, GROUP_CHAT_ID, get_admin_id, PROJECT_DIR
+from config import WORKSPACE_DIR, GROUP_CHAT_ID, get_admin_id, PROJECT_DIR, OWNER_NAME
 from db.memory import get_history, get_pending_tasks, delete_pending_task, save_message
 from hardware.display import parse_and_execute_commands
-from hardware.system import get_stats
 from hardware.auto_mood import apply_auto_mood, get_auto_mood
 from db.stats import on_heartbeat, get_status_bar, get_stats_summary
 from llm.router import get_router
@@ -25,6 +26,35 @@ DB_PATH = PROJECT_DIR / "gotchi.db"
 # Bot identity — read from env, defaults to generic
 MY_NAME = os.environ.get("BOT_NAME", "gotchi").lower().replace(" ", "-")
 SIBLING_BOT = os.environ.get("SIBLING_BOT_NAME", "")  # Optional sibling for mail
+
+
+def _sanitize_reflection_text(text: str) -> str:
+    """Keep only the reflection text (strip tool usage, headers, and status boilerplate)."""
+    if not text:
+        return ""
+    lines = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        lower = stripped.lower()
+        if lower.startswith("**heartbeat") or lower.startswith("heartbeat"):
+            continue
+        if lower.startswith("**system") or lower.startswith("system:"):
+            continue
+        if lower.startswith("**рефлек") or lower.startswith("рефлек"):
+            continue
+        if stripped.startswith("---"):
+            continue
+        lines.append(stripped)
+    return "\n".join(lines).strip()
+
+
+def _get_heartbeat_target_chat_id() -> int:
+    """Choose where to send heartbeat reflection."""
+    if GROUP_CHAT_ID:
+        return GROUP_CHAT_ID
+    return get_admin_id() or 0
 
 
 def get_unread_mail() -> list[dict]:
@@ -61,8 +91,8 @@ def send_mail(to_bot: str, message: str) -> bool:
         conn = sqlite3.connect(str(DB_PATH))
         cursor = conn.cursor()
         cursor.execute(
-            "INSERT INTO bot_mail (from_bot, to_bot, message) VALUES (?, ?, ?)",
-            (MY_NAME, to_bot, message)
+            "INSERT INTO bot_mail (from_bot, to_bot, message, sender) VALUES (?, ?, ?, ?)",
+            (MY_NAME, to_bot, message, MY_NAME)
         )
         conn.commit()
         conn.close()
@@ -73,7 +103,7 @@ def send_mail(to_bot: str, message: str) -> bool:
         return False
 
 
-def process_command_mail(message: str) -> str | None:
+def process_command_mail(message: str) -> Optional[str]:
     """
     Process command mails from brother.
     Format: CMD:<command> [args]
@@ -134,30 +164,73 @@ async def process_pending_tasks(context):
     
     log.info(f"Processing {len(tasks)} pending tasks...")
     
-    task_id, chat_id, text, sender, is_group = tasks[0]
+    # Avoid overload — process only a few per heartbeat
+    MAX_TASKS = 3
     
-    try:
-        router = get_router()
-        history = get_history(chat_id)
+    for task_id, chat_id, text, sender, is_group in tasks[:MAX_TASKS]:
+        try:
+            router = get_router()
+            history = get_history(chat_id)
+            if history:
+                history = history[:-1]
+            
+            response, connector = await router.call(text, history)
+            
+            # Handle error responses
+            if response.startswith("Error:"):
+                await send_message(
+                    context.bot,
+                    chat_id,
+                    f"🔔 [Delayed Reply]\n{response}"
+                )
+                delete_pending_task(task_id)
+                continue
+            
+            # Parse hardware commands
+            clean_text, cmds = parse_and_execute_commands(response)
+            
+            # Fallback face if none provided
+            if not cmds.get("face"):
+                try:
+                    from hardware.display import show_face
+                    show_face(mood="happy", text=clean_text[:50] if clean_text else "...")
+                except Exception:
+                    pass
+            
+            # Execute memory command
+            if cmds.get("remember"):
+                try:
+                    from db.memory import add_fact
+                    add_fact(cmds["remember"], "auto_memory")
+                except Exception:
+                    pass
+            
+            # Execute mail command
+            if cmds.get("mail") and SIBLING_BOT:
+                send_mail(SIBLING_BOT, cmds["mail"])
+            
+            # Save response to history
+            save_message(chat_id, "assistant", response)
+            
+            # Send delayed reply
+            msg = clean_text if clean_text.strip() else response
+            await send_message(
+                context.bot,
+                chat_id,
+                f"🔔 [Delayed Reply]\n{msg}",
+                parse_mode="Markdown" if connector == "litellm" else None
+            )
+            
+            delete_pending_task(task_id)
+            from db.stats import on_task_completed
+            on_task_completed()
         
-        async with router.lock:
-            response, connector = await router.call(text, history[:-3])
-        
-        await send_message(
-            context.bot, 
-            chat_id, 
-            f"🔔 [Delayed Reply]\n{response}"
-        )
-        
-        delete_pending_task(task_id)
-        from db.stats import on_task_completed
-        on_task_completed()
-        
-    except RateLimitError:
-        log.info("Still rate limited, keeping task in queue")
-    except Exception as e:
-        log.error(f"Task failed: {e}")
-        delete_pending_task(task_id)
+        except RateLimitError:
+            log.info("Still rate limited, keeping task in queue")
+            break
+        except Exception as e:
+            log.error(f"Task failed: {e}")
+            delete_pending_task(task_id)
 
 
 async def send_heartbeat(context):
@@ -226,12 +299,6 @@ async def send_heartbeat(context):
     except Exception:
         history_section = ""
     
-    # If we only had commands, skip LLM call
-    if unread_mail and not mail_section and command_responses:
-        log.info(f"Processed {len(command_responses)} command(s), skipping LLM")
-        run_hook(HookEvent(event_type="heartbeat", action="complete", text="commands only"))
-        return
-    
     # 5. Load heartbeat template
     hb_path = WORKSPACE_DIR / "HEARTBEAT.md"
     if not hb_path.exists():
@@ -249,92 +316,100 @@ async def send_heartbeat(context):
     if identity_path.exists():
         soul_parts.append(identity_path.read_text())
     
-    # 7. Inject stats
-    stats = get_stats()
-    stats_summary = get_stats_summary()
+    # 7. Build reflection prompt — focus on inner monologue, not stats
+    from config import BOT_NAME
     prompt = ""
-    
-    # Add soul/identity context first
+
+    # Add soul/identity context first (so the bot knows who it is)
     if soul_parts:
         prompt += "\n".join(soul_parts) + "\n\n---\n\n"
-    
-    prompt += (
-        template
-        .replace("{{uptime}}", stats.uptime)
-        .replace("{{temp}}", stats.temp)
-        .replace("{{memory}}", stats.memory)
-    )
-    
-    # Add current status
-    prompt += f"\n\n## Current Status\n"
-    prompt += f"- Level: {stats_summary['level']} {stats_summary['title']} ({stats_summary['xp']} XP)\n"
-    prompt += f"- Mood: {mood} ({mood_text})\n"
-    prompt += f"- Messages answered: {stats_summary['messages']}\n"
-    prompt += f"- Days alive: {stats_summary['days_alive']}\n"
-    
-    # Add Facts & Skills Context
+
+    # Inject bot name into template
+    prompt += template.replace("{{BOT_NAME}}", BOT_NAME)
+
+    # Recent activity context (what happened, not numbers)
+    context_parts = []
+
+    # What was the last conversation about?
     try:
-        from db.memory import get_facts
-        facts = get_facts()
-        if facts:
-            prompt += "\n## Recent Learned Facts\n"
-            for f in facts[-5:]:
-                prompt += f"- {f['content']} ({f['category']})\n"
-        
-        from skills.loader import get_eligible_skills
-        skills = get_eligible_skills()
-        if skills:
-            prompt += "\n## Active Skills\n"
-            for s in skills:
-                prompt += f"- {s.name}: {(s.description or '')[:50]}\n"
+        admin_id = get_admin_id()
+        if admin_id:
+            recent = get_history(admin_id, limit=5)
+            if recent:
+                last_user = [m for m in recent if m["role"] == "user"]
+                if last_user:
+                    last_msg = last_user[-1]["content"][:150]
+                    owner = OWNER_NAME or "Owner"
+                    context_parts.append(f"Last thing {owner} said: \"{last_msg}\"")
     except Exception:
         pass
-    
-    # Add recent daily log (conversation summaries from today)
+
+    # Today's activity log (conversation summaries, events)
     try:
         from memory.flush import get_recent_daily_logs
         daily = get_recent_daily_logs(days=1)
         if daily and len(daily.strip()) > 20:
-            # Truncate if too long
-            if len(daily) > 600:
-                daily = daily[:600] + "\n... (truncated)"
-            prompt += f"\n## Today's Activity Log\n{daily}\n"
+            if len(daily) > 500:
+                daily = daily[:500] + "..."
+            context_parts.append(f"Today's log:\n{daily}")
     except Exception:
         pass
-    
-    # Remind bot it can evolve
-    prompt += (
-        "\n\n💡 You can update your SOUL.md and IDENTITY.md with write_file() "
-        "if you feel your personality or self-description has evolved."
-    )
 
-    # Add mail sections
+    # Learned facts (things to think about)
+    try:
+        from db.memory import get_facts
+        facts = get_facts()
+        if facts:
+            recent_facts = [f['content'] for f in facts[-3:]]
+            context_parts.append(f"Things I remember: {'; '.join(recent_facts)}")
+    except Exception:
+        pass
+
+    if context_parts:
+        prompt += "\n\n## What I know right now\n" + "\n".join(f"- {p}" for p in context_parts)
+
+    # Mail from brother (something to think/feel about)
     if mail_section:
-        prompt += f"\n## New Mail\n{mail_section}"
-    prompt += history_section
-    
-    prompt += "\n\n[Respond with Qualitative Reflection, STATUS: OK, FACE: <mood>, or MAIL: <reply>]"
+        prompt += f"\n\n## Brother wrote to me\n{mail_section}"
+    if history_section:
+        prompt += history_section
+
+    prompt += "\n\n[Reflect. Think out loud. Then FACE: and SAY:]"
     
     # 7. Call LLM
     router = get_router()
     
-    if router.lock.locked():
-        log.info("Skipping heartbeat LLM: busy")
-        return
+    if router.lock.locked() and not router.force_lite:
+        log.info("Heartbeat LLM busy (Claude). Attempting Lite fallback.")
+        try:
+            response = await router.litellm.call(prompt, [])
+            connector = "litellm"
+        except Exception as e:
+            log.error(f"Heartbeat fallback failed: {e}")
+            run_hook(HookEvent(event_type="heartbeat", action="error", text=str(e)))
+            return
+    else:
+        response = None
+        connector = None
     
     try:
-        async with router.lock:
-            response, connector = await router.call(prompt, [])
+        if response is None:
+            async with router.lock:
+                response, connector = await router.call(prompt, [])
         
         log.info(f"Heartbeat [{connector}]: {response[:100]}")
         
         clean_text, commands = parse_and_execute_commands(response)
+        reflection_text = _sanitize_reflection_text(clean_text)
+        if not reflection_text:
+            # Fallback to a minimal reflection so heartbeat always speaks
+            reflection_text = "Тихие часы. Я здесь и продолжаю думать."
         
         # Save reflection to daily log (always, even if no commands)
-        if clean_text:
+        if reflection_text:
             try:
                 from memory.flush import write_to_daily_log
-                write_to_daily_log(f"[Heartbeat Reflection] {clean_text[:300]}")
+                write_to_daily_log(f"[Heartbeat Reflection] {reflection_text[:300]}")
             except Exception as e:
                 log.warning(f"Failed to save reflection: {e}")
         
@@ -345,7 +420,10 @@ async def send_heartbeat(context):
         # Send group message
         if commands.get("group"):
             try:
-                await send_message(context.bot, GROUP_CHAT_ID, commands["group"])
+                if GROUP_CHAT_ID:
+                    await send_message(context.bot, GROUP_CHAT_ID, commands["group"])
+                else:
+                    log.warning("GROUP: command but GROUP_CHAT_ID not configured")
             except Exception as e:
                 log.error(f"Failed to send GROUP message: {e}")
         
@@ -356,15 +434,24 @@ async def send_heartbeat(context):
                 await send_message(context.bot, admin_id, commands["dm"])
             except Exception as e:
                 log.error(f"Failed to send DM: {e}")
-        
-        if clean_text and not any(commands.values()):
+
+        # Always send reflection to chat (owner by default)
+        target_chat_id = _get_heartbeat_target_chat_id()
+        if reflection_text and target_chat_id:
             try:
-                await send_message(context.bot, GROUP_CHAT_ID, clean_text)
+                await send_message(context.bot, target_chat_id, reflection_text)
             except Exception as e:
-                log.error(f"Failed to send fallback message: {e}")
+                log.error(f"Failed to send reflection message: {e}")
                 
         run_hook(HookEvent(event_type="heartbeat", action="complete", text=response[:100]))
                 
     except Exception as e:
         log.error(f"Heartbeat error: {e}")
+        # Final fallback: send a minimal reflection so the owner still hears from us
+        try:
+            target_chat_id = _get_heartbeat_target_chat_id()
+            if target_chat_id:
+                await send_message(context.bot, target_chat_id, "Тихо. Я здесь и продолжаю думать.")
+        except Exception:
+            pass
         run_hook(HookEvent(event_type="heartbeat", action="error", text=str(e)))

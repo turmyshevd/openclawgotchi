@@ -344,7 +344,7 @@ class EPD:
         self.send_data(0x01)
         
         epdconfig.delay_ms(2000)
-        epdconfig.module_exit()
+        epdconfig.module_exit(cleanup=True)
 
 ### END OF FILE ###
 

@@ -4,6 +4,7 @@ Configuration — paths, environment variables, constants.
 
 import os
 from pathlib import Path
+from typing import Optional
 
 # --- Paths ---
 PROJECT_DIR = Path(__file__).parent.parent.resolve()
@@ -14,16 +15,25 @@ UI_SCRIPT = SRC_DIR / "ui" / "gotchi_ui.py"
 DATA_DIR = PROJECT_DIR / "data"
 CUSTOM_FACES_PATH = DATA_DIR / "custom_faces.json"
 
+def _env_flag(name: str, default: bool = False) -> bool:
+    """Parse boolean env var safely."""
+    val = os.environ.get(name)
+    if val is None:
+        return default
+    return val.strip().lower() in ("1", "true", "yes", "y", "on")
+
 # --- Environment ---
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 ALLOWED_USERS = os.environ.get("ALLOWED_USERS", "")  # comma-separated IDs
 ALLOWED_GROUPS = os.environ.get("ALLOWED_GROUPS", "")  # comma-separated IDs
+ALLOW_ALL_USERS = _env_flag("ALLOW_ALL_USERS", False)
 CLAUDE_TIMEOUT = int(os.environ.get("CLAUDE_TIMEOUT", "600"))
 HISTORY_LIMIT = int(os.environ.get("HISTORY_LIMIT", "10"))
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini/gemini-2.0-flash")
 GEMINI_API_BASE = os.environ.get("GEMINI_API_BASE", "")  # Optional override for Z.ai/OpenAI
 BOT_LANGUAGE = os.environ.get("BOT_LANGUAGE", "en")  # Default response language
 GROUP_CHAT_ID = int(os.environ.get("GROUP_CHAT_ID", "0"))  # Optional group for heartbeat
+ENABLE_LITELLM_TOOLS = _env_flag("ENABLE_LITELLM_TOOLS", False)
 
 # --- Bot Identity (customizable via onboarding) ---
 BOT_NAME = os.environ.get("BOT_NAME", "Gotchi")
@@ -88,7 +98,7 @@ def get_allowed_groups() -> list[int]:
     return [int(x.strip()) for x in ALLOWED_GROUPS.split(",") if x.strip()]
 
 
-def get_admin_id() -> int | None:
+def get_admin_id() -> Optional[int]:
     """Get first allowed user as admin."""
     users = get_allowed_users()
     return users[0] if users else None

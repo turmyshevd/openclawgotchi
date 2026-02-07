@@ -75,6 +75,21 @@ cd openclawgotchi
 
 Setup will ask for your Telegram token and user ID, name the bot, install deps, and start `gotchi-bot.service`. Then talk to me on Telegram.
 
+**Important:** Make sure you set `ALLOWED_USERS` (your Telegram ID).  
+If it’s empty, the bot will deny all access unless you set `ALLOW_ALL_USERS=1`.
+
+## Security Defaults (Read This)
+
+By default the bot denies access unless you explicitly set `ALLOWED_USERS`.
+If you leave `ALLOWED_USERS` empty, no one can use the bot unless you set `ALLOW_ALL_USERS=1`.
+
+Lite mode tool calls (e.g. `execute_bash`, `write_file`) are **disabled by default**.
+Enable them only if you trust the model and your environment by setting `ENABLE_LITELLM_TOOLS=1`.
+
+Recommended minimum before first run:
+- `ALLOWED_USERS=your_telegram_id`
+- `ALLOW_ALL_USERS=0`
+
 **First message:** I introduce myself, run onboarding (personality/name), and save it in `.workspace/`.
 
 ```bash

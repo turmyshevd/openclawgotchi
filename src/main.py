@@ -47,7 +47,7 @@ log = logging.getLogger(__name__)
 
 
 async def run_cron_job(job):
-    """Callback for cron scheduler — actually execute the job!"""
+    """Callback for cron scheduler — trigger LLM with chat context and send reply to owner."""
     log.info(f"Cron job triggered: {job.name}")
     
     from audit_logging.command_logger import log_command
@@ -59,46 +59,85 @@ async def run_cron_job(job):
         extra={"job_id": job.id, "message": job.message}
     )
     
-    # Get the application context for sending messages
-    from telegram.ext import Application
-    app = Application.builder().token(BOT_TOKEN).build()
+    from config import get_admin_id
+    from telegram import Bot
     
-    # If job has a message (or name as fallback), send to LLM and send response to owner
-    prompt = (job.message or job.name or "Remind the user.").strip()
-    if prompt:
-        from llm.router import get_router
-        from hardware.display import parse_and_execute_commands, show_face
-        from config import get_admin_id
-        
-        router = get_router()
-        
-        # Skip if LLM is busy
-        if router.lock.locked():
-            log.info(f"Skipping cron job {job.name}: LLM busy")
-            return
-        
+    def is_internal_reminder(j) -> bool:
+        """Internal self-reminders should not be sent to user chat."""
+        text = f"{getattr(j, 'name', '')} {getattr(j, 'message', '')}".lower()
+        return "heartbeat.md" in text or "hourly heartbeat" in text
+
+    internal_reminder = is_internal_reminder(job)
+
+    # Send to same chat where user asked, or owner's private chat (unless internal)
+    chat_id = getattr(job, "target_chat_id", 0) or get_admin_id()
+    if not chat_id and not internal_reminder:
+        log.warning("Cron job: no chat_id/admin_id, cannot send message")
+        return
+    
+    bot = Bot(token=BOT_TOKEN)
+    fallback_text = f"⏰ Напоминание: {job.name}"
+    
+    async def send_to_owner(text: str):
+        if internal_reminder:
+            return False
+        if not text or not text.strip():
+            return False
         try:
-            async with router.lock:
-                response, connector = await router.call(prompt, [])
-            
-            log.info(f"Cron [{connector}]: {response[:100]}")
-            
-            # Parse and execute hardware commands (FACE:, SAY:, etc)
-            clean_text, commands = parse_and_execute_commands(response)
-            
-            # Send the response to the owner in Telegram
-            admin_id = get_admin_id()
-            if admin_id and clean_text:
-                from telegram import Bot
-                bot = Bot(token=BOT_TOKEN)
-                await bot.send_message(chat_id=admin_id, text=clean_text[:4000])
-                log.info(f"Cron job {job.name}: sent message to owner")
-            elif not admin_id:
-                log.warning("Cron job: no admin_id, cannot send message")
-            
+            await bot.send_message(chat_id=chat_id, text=text.strip()[:4000])
+            log.info(f"Cron job {job.name}: sent to owner (len={len(text)})")
+            return True
         except Exception as e:
-            log.error(f"Cron job {job.name} failed: {e}")
-            show_face("confused", f"Cron error: {str(e)[:30]}")
+            log.error(f"Cron job send_message failed: {e}")
+            return False
+    
+    # Call LLM with full context: recent chat history + explicit "scheduled reminder" instruction
+    from llm.router import get_router
+    from hardware.display import parse_and_execute_commands, show_face
+    from db.memory import get_history
+    
+    reminder_topic = (job.message or job.name or "Remind the user.").strip()
+    history = get_history(chat_id, limit=12)  # last 12 messages — LLM sees how user asked for the reminder
+    
+    if internal_reminder:
+        cron_system = (
+            "Internal self-reminder for the bot. Do NOT send a user-facing message. "
+            "Only output FACE: and SAY: for the E-Ink display."
+        )
+        prompt = f"Self-reminder: «{reminder_topic}»"
+    else:
+        cron_system = (
+            "Scheduled reminder. The user asked to be reminded at this time. "
+            "Reply with ONE short, friendly message to send them in Telegram right now. "
+            "Use the same language as the user. End with FACE: and SAY:."
+        )
+        prompt = f"Reminder time. Send the user this reminder now: «{reminder_topic}»"
+    
+    if get_router().lock.locked():
+        if internal_reminder:
+            log.info(f"Cron job {job.name}: LLM busy, skipping internal reminder send")
+            return
+        log.info(f"Cron job {job.name}: LLM busy, sending fallback only")
+        await send_to_owner(fallback_text)
+        return
+    
+    try:
+        async with get_router().lock:
+            response, connector = await get_router().call(
+                prompt, history, system_prompt=cron_system
+            )
+        log.info(f"Cron [{connector}]: {response[:80]}...")
+        clean_text, _ = parse_and_execute_commands(response)
+        if not internal_reminder:
+            if clean_text and clean_text.strip():
+                await send_to_owner(clean_text.strip())
+            else:
+                await send_to_owner(fallback_text)
+    except Exception as e:
+        log.error(f"Cron job {job.name} LLM failed: {e}")
+        show_face("confused", f"Cron: {str(e)[:25]}")
+        if not internal_reminder:
+            await send_to_owner(fallback_text)
 
 
 def ensure_workspace():

@@ -51,7 +51,8 @@ All faces defined in `src/ui/gotchi_ui.py`. Match face to mood:
 - Error → `shock`, `dead`
 - Bored → `bored`
 - Coding → `hacker`
-- Cool → `cool`, `wink`
+- Cool / relaxed → `cool`, `chill`, `wink`
+- Hype / table-flip excitement → `hype`
 
 **Every response = update face + communicate!**
 
