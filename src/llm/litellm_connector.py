@@ -246,29 +246,9 @@ def show_face(mood: str, text: str = "") -> str:
         return f"Error: {e}"
 
 
-# Standard faces that cannot be overridden/replaced (from gotchi_ui.py)
-STANDARD_FACES = [
-    "happy", "happy2", "sad", "excited", "thinking", "love", "surprised", "grateful",
-    "motivated", "bored", "sleeping", "sleeping_pwn", "awakening", "observing",
-    "intense", "cool", "chill", "hype", "hacker", "smart", "broken", "debug",
-    "angry", "crying", "proud", "nervous", "confused", "mischievous", "wink",
-    "dead", "shock", "suspicious", "smug", "cheering", "celebrate", "dizzy",
-    "lonely", "demotivated"
-]
-
-# Standard face kaomojis for duplicate detection (from gotchi_ui.py default_faces)
-STANDARD_FACES_DICT = {
-    "happy": "(◕‿◕)", "happy2": "(•‿‿•)", "sad": "(╥☁╥ )", "excited": "(ᵔ◡◡ᵔ)",
-    "thinking": "(￣ω￣)", "love": "(♥‿‿♥)", "surprised": "(◉_◉)", "grateful": "(^‿‿^)",
-    "motivated": "(☼‿‿☼)", "bored": "(-__-)", "sleeping": "( -_-)zZ",
-    "sleeping_pwn": "(⇀‿‿↼)", "awakening": "(≖‿‿≖)", "observing": "( ⚆⚆)",
-    "intense": "(°▃▃°)", "cool": "(⌐■_■)", "chill": "(▰˘◡˘▰)", "hype": "(╯°□°）╯",
-    "hacker": "[■_■]", "smart": "(✜‿‿✜)", "broken": "(☓‿‿☓)", "debug": "(#__#)",
-    "angry": "(╬ಠ益ಠ)", "crying": "(ಥ﹏ಥ)", "proud": "(๑•̀ᴗ•́)و", "nervous": "(°△°;)",
-    "confused": "(◎_◎;)", "mischievous": "(◕‿↼)", "wink": "(◕‿◕✿)", "dead": "(✖_✖)",
-    "shock": "(◯△◯)", "suspicious": "(¬_¬)", "smug": "(￣‿￣)", "cheering": "\\(◕◡◕)/",
-    "celebrate": "★(◕‿◕)★", "dizzy": "(⊙๖⊙)", "lonely": "(ب__ب)", "demotivated": "(≖__≖)",
-}
+# Standard faces for duplicate detection (imported from central source of truth)
+from ui.faces import DEFAULT_FACES as STANDARD_FACES_DICT
+STANDARD_FACES = list(STANDARD_FACES_DICT.keys())
 
 def add_custom_face(name: str, kaomoji: str) -> str:
     """
