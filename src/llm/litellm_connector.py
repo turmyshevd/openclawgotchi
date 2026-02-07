@@ -1041,7 +1041,7 @@ def _format_tool_action(func_name: str, args: dict, result: str) -> str:
         return f"{icon} read last {n} messages"
     
     elif func_name == "execute_bash":
-        cmd = args.get("command", "")[:40].replace("`", "'")
+        cmd = args.get("command", "")[:200].replace("`", "'")
         ok = "✓" if "Error" not in result else "✗"
         return f"{icon} bash: {cmd} {ok}"
     
@@ -1055,7 +1055,7 @@ def _format_tool_action(func_name: str, args: dict, result: str) -> str:
         return f"{icon} wrote: {path} {ok}"
     
     elif func_name == "git_command":
-        cmd = args.get("command", "?")[:40].replace("`", "'")
+        cmd = args.get("command", "?")[:200].replace("`", "'")
         ok = "✓" if "Error" not in result else "✗"
         return f"{icon} git: {cmd} {ok}"
     
@@ -1063,7 +1063,7 @@ def _format_tool_action(func_name: str, args: dict, result: str) -> str:
         return f"{icon} health check"
 
     elif func_name == "log_error":
-        msg = (args.get("message") or "?")[:30]
+        msg = (args.get("message") or "?")[:100]
         return f"{icon} error log: {msg}"
 
     elif func_name == "safe_restart":
@@ -1071,7 +1071,7 @@ def _format_tool_action(func_name: str, args: dict, result: str) -> str:
     
     else:
         # Generic format
-        args_str = ", ".join(f"{k}={str(v)[:20]}" for k, v in list(args.items())[:2])
+        args_str = ", ".join(f"{k}={str(v)[:100]}" for k, v in list(args.items())[:3])
         ok = "✓" if "Error" not in result else "✗"
         return f"{icon} {func_name}({args_str}) {ok}"
 
