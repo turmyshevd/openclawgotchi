@@ -1057,7 +1057,7 @@ def _format_tool_action(func_name: str, args: dict, result: str) -> str:
     elif func_name == "git_command":
         cmd = args.get("command", "?")[:40]
         ok = "✓" if "Error" not in result else "✗"
-        return f"{icon} git {cmd} {ok}"
+        return f"{icon} git: `{cmd}` {ok}"
     
     elif func_name == "health_check":
         return f"{icon} health check"
@@ -1077,23 +1077,25 @@ def _format_tool_action(func_name: str, args: dict, result: str) -> str:
 
 
 def _build_tool_footer(actions: list[str]) -> str:
-    """Build compact tool usage footer for Telegram message."""
+    """Build premium tool usage footer for Telegram message."""
     # Skip show_face — it's visual, user sees it on the display
     visible = [a for a in actions if not a.startswith("😎 face:")]
     
     if not visible:
         return ""
     
-    lines = ["```", f"🔧 Tool usage ({len(visible)}):"]
-    for action in visible[:8]:  # Max 8 to keep it compact
-        # Avoid breaking markdown: no backticks inside the ``` block
-        safe = (action or "").replace("`", "'")
-        lines.append(f"  {safe}")
-    if len(visible) > 8:
-        lines.append(f"  ... +{len(visible) - 8} more")
-    lines.append("```")
+    # Premium layout: bold header and bulleted list
+    title = f"🛠️ *Tool usage ({len(visible)}):*"
+    action_lines = []
     
-    return "\n".join(lines)
+    for action in visible[:8]:  # Max 8 to keep it compact
+        # Use bullets for a professional look
+        action_lines.append(f"• {action}")
+        
+    if len(visible) > 8:
+        action_lines.append(f"• ... +{len(visible) - 8} more")
+        
+    return f"\n{title}\n" + "\n".join(action_lines)
 
 
 # ============================================================
