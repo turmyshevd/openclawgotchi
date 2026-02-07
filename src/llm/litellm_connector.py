@@ -266,7 +266,7 @@ STANDARD_FACES_DICT = {
     "hacker": "[■_■]", "smart": "(✜‿‿✜)", "broken": "(☓‿‿☓)", "debug": "(#__#)",
     "angry": "(╬ಠ益ಠ)", "crying": "(ಥ﹏ಥ)", "proud": "(๑•̀ᴗ•́)و", "nervous": "(°△°;)",
     "confused": "(◎_◎;)", "mischievous": "(◕‿↼)", "wink": "(◕‿◕✿)", "dead": "(✖_✖)",
-    "shock": "(◯△◯)", "suspicious": "(¬_¬)", "smug": "(￣ω￣)", "cheering": "\\(◕◡◕)/",
+    "shock": "(◯△◯)", "suspicious": "(¬_¬)", "smug": "(￣‿￣)", "cheering": "\\(◕◡◕)/",
     "celebrate": "★(◕‿◕)★", "dizzy": "(⊙๖⊙)", "lonely": "(ب__ب)", "demotivated": "(≖__≖)",
 }
 
@@ -281,9 +281,9 @@ def add_custom_face(name: str, kaomoji: str) -> str:
     
     name = name.lower().strip().replace(" ", "_").replace("-", "_")
     
-    # Validate kaomoji is reasonable length
-    if len(kaomoji) > 20:
-        return f"Error: kaomoji too long ({len(kaomoji)} chars). Max 20."
+    # Validate kaomoji is reasonable length (longest std is 9 chars)
+    if len(kaomoji) > 10:
+        return f"Error: kaomoji too long ({len(kaomoji)} chars). Max 10."
         
     # Check if this name is a standard face
     if name in STANDARD_FACES:
