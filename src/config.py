@@ -33,7 +33,7 @@ GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini/gemini-2.0-flash")
 GEMINI_API_BASE = os.environ.get("GEMINI_API_BASE", "")  # Optional override for Z.ai/OpenAI
 BOT_LANGUAGE = os.environ.get("BOT_LANGUAGE", "en")  # Default response language
 GROUP_CHAT_ID = int(os.environ.get("GROUP_CHAT_ID", "0"))  # Optional group for heartbeat
-ENABLE_LITELLM_TOOLS = _env_flag("ENABLE_LITELLM_TOOLS", False)
+ENABLE_LITELLM_TOOLS = _env_flag("ENABLE_LITELLM_TOOLS", True)
 
 # --- Bot Identity (customizable via onboarding) ---
 BOT_NAME = os.environ.get("BOT_NAME", "Gotchi")

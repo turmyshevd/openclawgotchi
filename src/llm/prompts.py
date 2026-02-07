@@ -7,8 +7,22 @@ Both Claude CLI and LiteLLM use the same files.
 
 from pathlib import Path
 
-from config import PROJECT_DIR, WORKSPACE_DIR
+from config import PROJECT_DIR, WORKSPACE_DIR, CUSTOM_FACES_PATH
 from hardware.system import get_stats_string
+import json
+
+
+def _load_custom_faces_list() -> str:
+    """Load list of custom faces for system prompt."""
+    if not CUSTOM_FACES_PATH.exists():
+        return ""
+    try:
+        faces = json.loads(CUSTOM_FACES_PATH.read_text())
+        if not faces:
+            return ""
+        return "Custom Moods: " + ", ".join(faces.keys())
+    except Exception:
+        return ""
 
 
 def load_bot_instructions() -> str:
@@ -154,6 +168,11 @@ def build_system_context(user_message: str = "") -> str:
     ALWAYS includes skills (if available).
     """
     parts = [load_bot_instructions()]
+    
+    # Add custom faces list if any
+    custom_faces = _load_custom_faces_list()
+    if custom_faces:
+        parts.append(f"\n{custom_faces}")
     
     # CRITICAL FIX: Always include skills in system prompt!
     skills_text = format_skills_for_prompt()

@@ -900,16 +900,8 @@ TOOLS = [
         "parameters": {"type": "object", "properties": {}, "required": []}
     }},
     {"type": "function", "function": {
-        "name": "show_face",
-        "description": "Show a face/mood on the E-Ink display. Optionally add text (speech bubble or status).",
-        "parameters": {"type": "object", "properties": {
-            "mood": {"type": "string", "description": "Face mood: happy, sad, excited, thinking, love, surprised, bored, sleeping, hacker, proud, nervous, confused, mischievous, cool, chill, hype, wink, dead, shock, celebrate, cheering"},
-            "text": {"type": "string", "description": "Optional status text or SAY:text for speech bubble (max 60 chars)"}
-        }, "required": ["mood"]}
-    }},
-    {"type": "function", "function": {
         "name": "add_custom_face",
-        "description": "Add a custom face to data/custom_faces.json. After adding, you MUST call show_face(mood=name, text='...') in the same turn so the user sees it on the E-Ink. Do NOT say reboot or reload is needed — the face is available immediately. Always output FACE: <name> and SAY: <short text> in your reply.",
+        "description": "Add a custom face to data/custom_faces.json. After adding, the face becomes available immediately. ALWAYS output FACE: <name> and SAY: <short text> in your FINAL reply to the user so they see the new face on the E-Ink display.",
         "parameters": {"type": "object", "properties": {
             "name": {"type": "string", "description": "Mood name (lowercase, no spaces, e.g. 'zen', 'determined', 'focused')"},
             "kaomoji": {"type": "string", "description": "Unicode kaomoji string (max 20 chars, e.g. '(◕‿◕)', '(⌐■_■)', '(°▃▃°)')"}
@@ -947,7 +939,6 @@ TOOL_MAP = {
     "remember_fact": remember_fact,
     "recall_facts": recall_facts,
     "recall_messages": recall_messages,
-    "show_face": show_face,
     "add_custom_face": add_custom_face,
     "read_skill": read_skill,
     "search_skills": search_skills,

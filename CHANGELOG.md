@@ -13,6 +13,9 @@ All notable changes to the OpenClawGotchi project will be documented in this fil
 - **Heartbeat reflection logging**: Reflection text now saved to `memory/YYYY-MM-DD.md` daily logs.
 - **Custom faces in display skill**: `add_custom_face()` documented, `data/custom_faces.json` mentioned.
 
+### Added
+- **Function Calling**: Enabled by default (`ENABLE_LITELLM_TOOLS=True`). The bot will now append tool usage (e.g., `remember_fact`, `check_mail`) to its replies.
+
 ### Changed
 - **BOT_INSTRUCTIONS.md**: Slimmed from 86 to 58 lines — removed duplicate formatting examples, added Self-Knowledge Files and Self-Maintenance sections.
 - **ARCHITECTURE.md**: Rewritten — correct 20 levels, 4h heartbeat interval, all current tools listed, context loading explained.
@@ -63,8 +66,17 @@ All notable changes to the OpenClawGotchi project will be documented in this fil
   - Updated `.gitignore` to protect secrets and runtime data
 
 ### Fixed
-- **Rate Limit Resilience**: Improved handling and queuing of messages when Claude is rate-limited.
-- **Tool Logic**: Resolved issues where the bot would repeat search/grep actions instead of providing an answer.
+- **Tool Logging**: Restored visibility of tool execution in Telegram messages.
+- **Custom Face Consistency**: Removed redundant `show_face` tool. This fixes a bug where the bot would set a face via tool, but then the Telegram handler would overwrite it with a "happy" fallback because the `FACE:` tag was missing from the final text.
+
+## [1.2.0] - 2026-02-07
+### Added
+- **Internal Reminders Logic**: Smart filtering for technical cron jobs (like heartbeat). The bot now handles technical tasks silently via E-Ink without spamming the user chat.
+- **Dynamic Face Injection**: Custom faces are now dynamically injected into the system prompt, ensuring the bot "remembers" its expanded repertoire.
+- **Enhanced GPIO Cleanup**: Robust `try...finally` blocks in UI rendering to prevent hardware freezes.
+
+### Restored
+- **Codebase Integrity**: Restored the project from the 2026-02-07 backup, which contains the most stable and feature-rich implementation of hooks, audit logging, and hardware management.
 
 ## [Unreleased] - 2026-02-04
 
