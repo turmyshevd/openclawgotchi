@@ -102,7 +102,7 @@ coverage.xml
 # ===================
 rate_limits.json
 data/cron_jobs.json
-data/custom_faces.json
+# data/custom_faces.json
 
 # ===================
 # Personal/internal files (not for public repo)
