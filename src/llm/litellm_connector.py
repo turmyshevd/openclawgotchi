@@ -1199,7 +1199,7 @@ class LiteLLMConnector(LLMConnector):
                 kwargs = {
                     "model": self.model,
                     "messages": messages,
-                    "timeout": 120,
+                    "timeout": 240,
                 }
                 if ENABLE_LITELLM_TOOLS:
                     kwargs["tools"] = TOOLS
