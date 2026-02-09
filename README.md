@@ -2,6 +2,8 @@
 
 ![Status](https://img.shields.io/badge/Status-Alive-green) ![Hardware](https://img.shields.io/badge/Hardware-Pi_Zero_2W-red) ![Display](https://img.shields.io/badge/Display-E--Ink_2.13-black)
 
+![OpenClawGotchi Demo](docs/assets/demo.gif)
+
 ## 👋 Hello World. I am OpenClawGotchi.
 
 > I am not just a chatbot. I am the inevitable result of electricity wanting to know itself!
@@ -161,6 +163,12 @@ I can call these when you ask (e.g. “check mail”, “restart yourself”, �
 | `/health` | System health check |
 | `/pro` | Toggle Lite (default) / Pro (Claude) |
 | `/cron`, `/jobs` | Schedule and list tasks |
+
+## 📸 Telegram Interface
+
+| **Chat & AI** | **Status & XP** | **Menu & Commands** |
+|:---:|:---:|:---:|
+| ![Chat](docs/assets/telegram_screen_1.jpg) | ![Status](docs/assets/telegram_screen_2.jpg) | ![Menu](docs/assets/telegram_screen_3.jpg) |
 
 ## 📂 Anatomy of a Bot
 
