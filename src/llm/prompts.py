@@ -8,7 +8,6 @@ Both Claude CLI and LiteLLM use the same files.
 from pathlib import Path
 
 from config import PROJECT_DIR, WORKSPACE_DIR, CUSTOM_FACES_PATH
-from hardware.system import get_stats_string
 import json
 
 
@@ -209,13 +208,13 @@ def build_system_context(user_message: str = "") -> str:
     if memory_parts:
         parts.append(f"\n---\n{memory_parts}")
     
-    # Stats for context only — do NOT encourage the model to echo them
-    parts.append(
-        "\n---\n## System Status (internal only — do NOT include in replies)\n"
-        + get_stats_string()
-        + "\nDo not add 'life update', temperature, or status tables to messages unless the user explicitly asked for status."
-        + "\n\n⚠️ REMINDER: If you DO output status (when asked), use emoji + key:value format in code blocks. NO markdown tables (`| table |`) — they look bad. Example: `🎮 Level: 6` not `| Level | 6 |`."
-    )
+    # Minimal self-awareness (level + title only, no system stats)
+    try:
+        from db.stats import get_stats_summary
+        g = get_stats_summary()
+        parts.append(f"\n[Self: Level {g['level']} {g['title']} | XP: {g['xp']}]")
+    except Exception:
+        pass
     return "\n".join(parts)
 
 

@@ -115,6 +115,10 @@ def parse_and_execute_commands(response: str, execute: bool = True) -> tuple[str
         if not stripped:
             continue
         
+        # Skip markdown separators (LLM echoes from system prompt)
+        if re.match(r"^-{2,}$", stripped):
+            continue
+        
         match = cmd_pattern.match(stripped)
         if match:
             cmd_type = match.group(1).upper()
