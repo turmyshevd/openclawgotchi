@@ -8,6 +8,9 @@
 # External skills (clone separately if needed)
 openclaw-skills/
 
+# Archive (unused files)
+archive/
+
 # ===================
 # Python
 # ===================
