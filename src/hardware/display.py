@@ -85,9 +85,14 @@ def show_text(text: str):
     update_display(text=text)
 
 
-def parse_and_execute_commands(response: str) -> tuple[str, dict]:
+def parse_and_execute_commands(response: str, execute: bool = True) -> tuple[str, dict]:
     """
-    Parse LLM response for hardware commands, execute them, return clean text.
+    Parse LLM response for hardware commands, execute them (optional), return clean text.
+    
+    Args:
+        response: Raw LLM response text.
+        execute: If True, immediately calls update_display matching the commands.
+                 Set False if caller wants to handle display updates manually.
     
     Returns:
         tuple: (clean_text, commands_dict)
@@ -96,56 +101,56 @@ def parse_and_execute_commands(response: str) -> tuple[str, dict]:
     """
     lines = response.strip().splitlines()
     clean_lines = []
-    commands = {"face": None, "display": None, "dm": None, "group": None, "mail": None}
+    commands = {"face": None, "display": None, "dm": None, "group": None, "mail": None, "remember": None}
+    
+    # Regex to catch commands even if bolded/italicized/bracketed
+    # Matches: **FACE: happy**, [SAY: Hello], etc.
+    cmd_pattern = re.compile(
+        r"^\s*(?:[\*_~\[\(]+)?(FACE|DISPLAY|SAY|DM|GROUP|MAIL|REMEMBER|STATUS):(?:\s*[\*_~\]\)]+)?\s*(.*)$",
+        re.IGNORECASE
+    )
     
     for line in lines:
         stripped = line.strip()
         if not stripped:
             continue
         
-        # FACE: <mood>
-        if stripped.upper().startswith("FACE:"):
-            mood = stripped[5:].strip().lower()
-            commands["face"] = mood
-            log.info(f"CMD FACE: {mood}")
-        
-        # DISPLAY: <text>
-        elif stripped.upper().startswith("DISPLAY:"):
-            text = stripped[8:].strip()
-            commands["display"] = text
-            log.info(f"CMD DISPLAY: {text}")
-        
-        # SAY: <text> (Direct speech bubble)
-        elif stripped.upper().startswith("SAY:"):
-            text = stripped[4:].strip()
-            commands["display"] = f"SAY:{text}"
-            log.info(f"CMD SAY: {text}")
-        
-        # DM: <message> — for heartbeat to send private message
-        elif stripped.upper().startswith("DM:"):
-            msg = stripped[3:].strip()
-            commands["dm"] = msg
-        
-        # GROUP: <message> — for heartbeat to send group message
-        elif stripped.upper().startswith("GROUP:"):
-            msg = stripped[6:].strip()
-            commands["group"] = msg
-        
-        # STATUS: OK — heartbeat acknowledgment, skip
-        elif stripped.upper().startswith("STATUS:"):
-            continue
-        
-        # REMEMBER: <fact> — for auto-saving memory
-        elif stripped.upper().startswith("REMEMBER:"):
-            fact = stripped[9:].strip()
-            commands["remember"] = fact
+        match = cmd_pattern.match(stripped)
+        if match:
+            cmd_type = match.group(1).upper()
+            content = match.group(2).strip()
+            
+            # Remove trailing markdown if present (e.g. "**")
+            # Simple check: if content ends with the same char as line started, strip it? 
+            # Easier: just strip common markdown closers
+            content = content.rstrip("*_~])")
+            
+            log.info(f"CMD parsed: {cmd_type} -> {content}")
 
-        # MAIL: <message> — reply to brother
-        elif stripped.upper().startswith("MAIL:"):
-            msg = stripped[5:].strip()
-            commands["mail"] = msg
-            log.info(f"CMD MAIL: {msg[:50]}...")
-
+            if cmd_type == "FACE":
+                commands["face"] = content.lower()
+            
+            elif cmd_type == "DISPLAY":
+                commands["display"] = content
+            
+            elif cmd_type == "SAY":
+                commands["display"] = f"SAY:{content}"
+            
+            elif cmd_type == "DM":
+                commands["dm"] = content
+            
+            elif cmd_type == "GROUP":
+                commands["group"] = content
+            
+            elif cmd_type == "MAIL":
+                commands["mail"] = content
+            
+            elif cmd_type == "REMEMBER":
+                commands["remember"] = content
+                
+            elif cmd_type == "STATUS":
+                continue # Ignore status checks
+                
         # Skip lone HTML-like tags (LLM sometimes outputs </...> before FACE:)
         elif re.match(r"^\s*</?\w+>\s*$", stripped):
             continue
@@ -154,8 +159,8 @@ def parse_and_execute_commands(response: str) -> tuple[str, dict]:
         else:
             clean_lines.append(stripped)
     
-    # Execute batch update if needed
-    if commands["face"] or commands["display"]:
+    # Execute batch update if needed (and requested)
+    if execute and (commands["face"] or commands["display"]):
         disp_text = commands["display"]
         update_display(mood=commands["face"], text=disp_text)
     

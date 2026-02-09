@@ -570,11 +570,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(response)
             return
         
-        # Parse hardware commands
-        clean_text, cmds = parse_and_execute_commands(response)
+        # Parse hardware commands (do NOT execute automatically, we handle it below)
+        clean_text, cmds = parse_and_execute_commands(response, execute=False)
         
+        # Execute FACE command if provided (with smart text fallback)
+        if cmds.get("face"):
+            show_face(mood=cmds["face"], text=cmds.get("display") or clean_text[:50])
         # Fallback: if LLM didn't include FACE:, show a default face
-        if not cmds.get("face"):
+        else:
             show_face(mood="happy", text=clean_text[:50] if clean_text else "...")
         
         # Execute memory command
