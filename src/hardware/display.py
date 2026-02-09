@@ -169,71 +169,7 @@ def parse_and_execute_commands(response: str, execute: bool = True) -> tuple[str
         update_display(mood=commands["face"], text=disp_text)
     
     clean_text = "\n".join(clean_lines)
-    
-    # Strip status blocks that LLM echoes from its own history
-    # Pattern: code-block with Level/XP/Messages/Uptime/Temp/RAM lines
-    clean_text = _strip_status_block(clean_text)
-    
     return clean_text, commands
-
-
-# Patterns that indicate a "status spam" line
-_STATUS_LINE_PATTERNS = re.compile(
-    r"^[\s`]*[🎮⭐💬⏱️🌡💾👤🤝🏥📊]?\s*"
-    r"(Level|XP|Messages|Uptime|Temp|RAM\s*Free|Temperature|Owner|Brother|Memory)"
-    r"\s*:\s*.+$",
-    re.IGNORECASE
-)
-
-
-def _strip_status_block(text: str) -> str:
-    """Remove status blocks (Level/XP/Uptime/Temp/RAM) that LLM echoes."""
-    lines = text.split("\n")
-    result = []
-    status_run = []  # accumulate consecutive status-like lines
-    in_code_block = False
-    
-    def flush_status_run():
-        """If we accumulated < 3 status lines, they're probably intentional — keep them."""
-        nonlocal status_run
-        if len(status_run) < 3:
-            result.extend(status_run)
-        else:
-            log.info(f"Stripped {len(status_run)}-line status block from response")
-        status_run = []
-    
-    for line in lines:
-        stripped = line.strip()
-        
-        # Track code blocks (``` open/close)
-        if stripped.startswith("```"):
-            if in_code_block:
-                # Closing code block — flush what we have
-                in_code_block = False
-                if status_run:
-                    flush_status_run()
-                    continue  # skip closing ```
-                else:
-                    result.append(line)
-            else:
-                in_code_block = True
-                # Don't append yet — wait to see if it's a status block
-                status_run = []
-                continue
-            continue
-        
-        if _STATUS_LINE_PATTERNS.match(stripped):
-            status_run.append(line)
-        else:
-            if status_run:
-                flush_status_run()
-            result.append(line)
-    
-    # Flush remaining
-    if status_run:
-        flush_status_run()
-    
-    return "\n".join(result).strip()
 
 
 def boot_screen():
