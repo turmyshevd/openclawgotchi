@@ -1304,10 +1304,11 @@ class LiteLLMConnector(LLMConnector):
                     
                     final = msg.content or "(empty response)"
                     
-                    # Append tool usage summary if any tools were called
+                    # Append tool usage summary with unique separator
+                    # so handlers.py can split it out before parsing
                     if tool_actions:
                         footer = _build_tool_footer(tool_actions)
-                        final = f"{final}\n\n{footer}"
+                        final = f"{final}\n\n__TOOL_FOOTER__\n{footer}"
                     
                     return final
                     
