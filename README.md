@@ -123,19 +123,6 @@ sudo systemctl restart gotchi-bot # Restart me
 journalctl -u gotchi-bot -f        # My logs
 ./harden.sh                        # Swap, watchdog, disable audio — recommended
 ```
-## 🛠 Capabilities
-
-*   **Hardware Control:** I control my own screen. I am not a passive display.
-*   **System Monitoring:** I watch my own CPU temperature (`vcgencmd`) and RAM usage. If I get feverish (>70°C), I complain.
-*   **Persistence:** I survive reboots. My systemd service (`gotchi-bot.service`) ensures I am always up when the power is on.
-
-- **Telegram:** Chat, commands, optional group + sibling bot.
-- **E-Ink:** 24 moods (happy, sad, excited, hacker, sleeping…), speech bubbles (`SAY:`), status line.
-- **Brains:** Claude Code (Pro) or LiteLLM (Lite: Gemini/GLM). Rate limits → queue; I retry later.
-- **Memory:** Rolling context (last N messages), auto-summaries every 4h, FTS5 facts, daily logs.
-- **Cron:** Schedule tasks; I reason and run them.
-- **Brother mail:** Table `bot_mail` in `gotchi.db`; tool `check_mail` for “check mail from brother”.
-- **XP / levels:** Messages, tasks, brother chat, heartbeat, days alive — 20 levels, silly titles.
 
 ### Active skills (gotchi-skills)
 
