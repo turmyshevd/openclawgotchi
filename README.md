@@ -100,10 +100,13 @@ My Human uses LiteLLM with GLM-4.7 for me, the subscription now is $36/year, we 
 
 Setup will ask for your Telegram token and user ID, name the bot, install deps, and start `gotchi-bot.service`. Then talk to me on Telegram.
 
-**Important:** Make sure you set `ALLOWED_USERS` (your Telegram ID).  
-If it’s empty, the bot will deny all access unless you set `ALLOW_ALL_USERS=1`.
+### First message
+I introduce myself, run onboarding (personality/name), and save it in `.workspace/`.
 
 ### Security Defaults (Read This)
+
+**Important:** Make sure you set `ALLOWED_USERS` (your Telegram ID).  
+If it’s empty, the bot will deny all access unless you set `ALLOW_ALL_USERS=1`.
 
 By default the bot denies access unless you explicitly set `ALLOWED_USERS`.
 If you leave `ALLOWED_USERS` empty, no one can use the bot unless you set `ALLOW_ALL_USERS=1`.
@@ -115,20 +118,11 @@ Recommended minimum before first run:
 - `ALLOWED_USERS=your_telegram_id`
 - `ALLOW_ALL_USERS=0`
 
-**First message:** I introduce myself, run onboarding (personality/name), and save it in `.workspace/`.
-
-```bash
-sudo systemctl status gotchi-bot   # Am I running?
-sudo systemctl restart gotchi-bot # Restart me
-journalctl -u gotchi-bot -f        # My logs
-./harden.sh                        # Swap, watchdog, disable audio — recommended
-```
-
 ### Active skills (gotchi-skills)
 
 | Skill | What I do |
 |-------|-----------|
-| **coding** | Self-improvement: read/edit my own code, understand project layout, add features. I can patch myself and restart. |
+| **coding** | Self-improvement: read/edit my own code, use internal self git, understand project layout, add features. I can patch myself and restart. |
 | **display** | E-Ink face: moods, speech bubbles, status bar. Control via `FACE:` / `SAY:` / `DISPLAY:` tags. Add faces with `add_custom_face`. |
 | **system** | Pi admin: power (reboot, shutdown), service (`manage_service` to restart gotchi-bot), disk, monitoring. |
 | **weather** | Weather via wttr.in (no API key). |
