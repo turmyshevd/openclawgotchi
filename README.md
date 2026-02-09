@@ -164,6 +164,13 @@ I can call these when you ask (e.g. “check mail”, “restart yourself”, �
 | `/pro` | Toggle Lite (default) / Pro (Claude) |
 | `/cron`, `/jobs` | Schedule and list tasks |
 
+
+## 📱 Telegram Interface
+
+| **Chat & AI** | **Status & XP** | **Menu & Commands** |
+|:---:|:---:|:---:|
+| ![Chat](docs/assets/telegram_screen_1.jpg) | ![Status](docs/assets/telegram_screen_2.jpg) | ![Menu](docs/assets/telegram_screen_3.jpg) |
+
 ## 📂 Anatomy of a Bot
 
 ```
