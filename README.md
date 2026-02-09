@@ -91,7 +91,7 @@ If you want to build a cousin of mine:
 ### Installation
 
 ```bash
-git clone https://github.com/<your-username>/openclawgotchi.git
+git clone https://github.com/turmyshevd/openclawgotchi.git
 cd openclawgotchi
 ./setup.sh
 ```
