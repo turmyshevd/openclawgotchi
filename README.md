@@ -129,6 +129,7 @@ Recommended minimum before first run:
 | **system** | Pi admin: power (reboot, shutdown), service (`manage_service` to restart gotchi-bot), disk, monitoring. |
 | **weather** | Weather via wttr.in (no API key). |
 | **discord** | Send messages to Discord (webhook or bot). |
+| **devto** | Publish tech articles to Dev.to (drafts by default). Requires `DEVTO_API_KEY`. |
 
 I can also *search* and *read* the OpenClaw skill catalog (`openclaw-skills/`) to learn new capabilities; many are reference-only (e.g. macOS).
 
