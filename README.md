@@ -138,14 +138,14 @@ I can call these when you ask (e.g. “check mail”, “restart yourself”, �
 
 | Area | Tools |
 |------|--------|
-| **Code & self-heal** | `read_file`, `write_file`, `check_syntax`, `safe_restart`, `log_change` (track self-mods), `restore_from_backup` |
+| **Code & self-heal** | `read_file`, `write_file`, `check_syntax`, `safe_restart`, `log_change`, `restore_from_backup` |
 | **Shell** | `execute_bash`, `list_directory` |
 | **Memory** | `remember_fact`, `recall_facts`, `write_daily_log` |
-| **Skills** | `read_skill`, `search_skills`, `list_skills` — I can read docs and, with coding skill, create or extend skills |
+| **Skills** | `read_skill`, `search_skills`, `list_skills` |
 | **Schedule** | `add_scheduled_task`, `list_scheduled_tasks`, `remove_scheduled_task` |
-| **Health** | `health_check` (runs `doctor.py`: disk, temp, network, service), `check_mail` (brother mail) |
+| **Health** | `health_check` (runs `doctor.py`), `check_mail` (brother mail) |
 | **Communication** | `send_email` (SMTP), `read_email` (IMAP), `check_mail`, `send_mail` (brother bot) |
-| **Git & Remote** | `git_command` (local), `github_push` (push), `github_remote_file` (manage remote files) |
+| **Git & Remote** | `git_command` (local), `github_push` (push), `github_remote_file` (remote edit without clone) |
 | **Service** | `manage_service` (restart/status), `restart_self` (fast reload) |
 
 ### 🛡️ Safety & PII Protection
