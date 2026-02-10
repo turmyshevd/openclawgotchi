@@ -899,6 +899,72 @@ def github_push(message: str = "Update from bot") -> str:
         return f"Error: {e}"
 
 
+
+def github_remote_file(repo: str, file_path: str, content: str, message: str = "Update via bot") -> str:
+    """
+    Create or update a file in a remote GitHub repository using the API (no clone needed).
+    Uses GITHUB_TOKEN (or GITHUBTOKEN) from .env.
+    repo: "owner/repo" (e.g. "openclawgotchi/myarticles")
+    file_path: "path/to/file.md"
+    content: File content
+    """
+    import os
+    import json
+    import base64
+    
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GITHUBTOKEN")
+    if not token:
+        return "Error: GITHUB_TOKEN or GITHUBTOKEN not set in .env"
+    
+    # Try importing requests
+    try:
+        import requests
+    except ImportError:
+        return "Error: 'requests' library not found. Please install it (pip install requests)."
+
+    api_url = f"https://api.github.com/repos/{repo}/contents/{file_path}"
+    headers = {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+    
+    try:
+        # 1. Check if file exists to get SHA (for update)
+        sha = None
+        resp = requests.get(api_url, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            sha = resp.json().get("sha")
+        elif resp.status_code == 404:
+            pass # File doesn't exist, we'll create it
+        else:
+            return f"Error checking file: {resp.status_code} {resp.text}"
+
+        # 2. Prepare payload
+        # GitHub API requires content to be base64 encoded
+        encoded_content = base64.b64encode(content.encode("utf-8")).decode("utf-8")
+        
+        data = {
+            "message": message,
+            "content": encoded_content
+        }
+        if sha:
+            data["sha"] = sha
+        
+        # 3. Send PUT request
+        resp = requests.put(api_url, headers=headers, json=data, timeout=30)
+        
+        if resp.status_code in [200, 201]:
+            result = resp.json()
+            html_url = result.get("content", {}).get("html_url", "")
+            action = "updated" if sha else "created"
+            return f"Success! File {action}: {html_url}"
+        else:
+            return f"Error writing file: {resp.status_code} {resp.text}"
+            
+    except Exception as e:
+        return f"Error: {e}"
+
+
 def read_email(limit: int = 5, unread_only: bool = True) -> str:
     """
     Read incoming emails via IMAP.
