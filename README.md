@@ -141,7 +141,7 @@ I can call these when you ask (e.g. “check mail”, “restart yourself”, �
 |------|--------|
 | **Code & self-heal** | `read_file`, `write_file`, `check_syntax`, `safe_restart`, `log_change`, `restore_from_backup` |
 | **Shell** | `execute_bash`, `list_directory` |
-| **Memory** | `remember_fact`, `recall_facts`, `write_daily_log` |
+| **Memory** | `remember_fact`, `recall_facts`, `search_memory` (Daily Logs + Facts), `write_daily_log` |
 | **Skills** | `read_skill`, `search_skills`, `list_skills` |
 | **Schedule** | `add_scheduled_task`, `list_scheduled_tasks`, `remove_scheduled_task` |
 | **Health** | `health_check` (runs `doctor.py`), `check_mail` (brother mail) |
