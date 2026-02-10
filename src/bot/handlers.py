@@ -564,11 +564,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         response, connector = await router.call(user_text, history)
         log.info(f"[{sender}] <- [{connector}] {response[:80]}")
         
-        # Check for error response (e.g. from LiteLLM)
+        # Check for error response — retry once for transient errors
         if response.startswith("Error:"):
-            error_screen(response)
-            await update.message.reply_text(response)
-            return
+            # Transient errors worth retrying (network, timeout, etc.)
+            transient_keywords = ["timeout", "connect", "rate", "500", "502", "503", "429"]
+            is_transient = any(kw in response.lower() for kw in transient_keywords)
+            
+            if is_transient:
+                log.warning(f"[Retry] Transient error, retrying: {response[:80]}")
+                import asyncio
+                await asyncio.sleep(2)
+                try:
+                    response, connector = await router.call(user_text, history)
+                except Exception as retry_err:
+                    log.error(f"[Retry] Failed again: {retry_err}")
+                    response = f"Error (after retry): {retry_err}"
+                    connector = "litellm"
+            
+            # If still an error after retry (or non-transient), show it
+            if response.startswith("Error:"):
+                error_screen(response)
+                await update.message.reply_text(response)
+                return
         
         # Separate tool footer from LLM response (footer added by connector)
         tool_footer = ""
