@@ -1458,7 +1458,13 @@ class LiteLLMConnector(LLMConnector):
                         })
                     
                 else:
-                    return (msg.content or "") + _build_tool_footer(tool_actions)
+                    # Append tool usage summary with unique separator
+                    # so handlers.py can split it out before parsing
+                    if tool_actions:
+                        footer = _build_tool_footer(tool_actions)
+                        return (msg.content or "") + f"\n\n__TOOL_FOOTER__\n{footer}"
+                    
+                    return msg.content or ""
                     
             except Exception as e:
                 log.error(f"LiteLLM call error: {e}", exc_info=True)
