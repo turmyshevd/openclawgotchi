@@ -173,11 +173,32 @@ def _build_memory_context() -> str:
     return "\n\n".join(sections)
 
 
+def _load_task_anchor() -> str:
+    """Load active task anchor if present."""
+    task_file = WORKSPACE_DIR / "CURRENT_TASK.json"
+    try:
+        if task_file.exists():
+            import json
+            data = json.loads(task_file.read_text())
+            task = data.get("task", "")
+            steps = data.get("steps", "")
+            if task:
+                anchor = f"## 📌 ACTIVE TASK (saved by you — DO NOT re-ask what to do!)\n"
+                anchor += f"**Task:** {task}\n"
+                if steps:
+                    anchor += f"**Steps:** {steps}\n"
+                anchor += "**Action:** Continue from where you left off. Do NOT ask the user what to do.\n"
+                return anchor
+    except Exception:
+        pass
+    return ""
+
+
 def build_system_context(user_message: str = "") -> str:
     """
     Build system context with lazy loading.
     Only includes ARCHITECTURE/TOOLS when query needs them.
-    ALWAYS includes skills (if available).
+    ALWAYS includes: skills, identity (paths/repos), task anchor.
     """
     parts = [load_bot_instructions()]
     
@@ -185,6 +206,16 @@ def build_system_context(user_message: str = "") -> str:
     custom_faces = _load_custom_faces_list()
     if custom_faces:
         parts.append(f"\n{custom_faces}")
+    
+    # ALWAYS include identity (contains critical paths and repo info)
+    identity = load_identity()
+    if identity:
+        parts.append(f"\n---\n{identity}")
+    
+    # ALWAYS include task anchor if present (survives context loss)
+    task_anchor = _load_task_anchor()
+    if task_anchor:
+        parts.append(f"\n---\n{task_anchor}")
     
     # CRITICAL FIX: Always include skills in system prompt!
     skills_text = format_skills_for_prompt()
@@ -208,9 +239,7 @@ def build_system_context(user_message: str = "") -> str:
         soul = load_soul()
         if soul:
             parts.append(f"\n---\n{soul}")
-        identity = load_identity()
-        if identity:
-            parts.append(f"\n---\n{identity}")
+        # identity already loaded above, but add the edit hint
         parts.append(
             "\n💡 You can update SOUL.md and IDENTITY.md with write_file() "
             "to evolve your personality and self-description over time."

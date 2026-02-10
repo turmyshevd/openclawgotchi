@@ -300,6 +300,10 @@ def github_remote_file(repo: str, file_path: str, content: str, message: str = "
     Create or update a file in a remote GitHub repository using the API (no clone needed).
     Uses GITHUB_TOKEN (or GITHUBTOKEN) from .env.
     """
+    # SAFETY: reject empty content to prevent publishing blank files
+    if not content or not content.strip():
+        return "Error: content is empty — refusing to create a blank file. Provide actual content."
+
     token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GITHUBTOKEN")
     if not token:
         return "Error: GITHUB_TOKEN or GITHUBTOKEN not set in .env"
@@ -329,6 +333,7 @@ def github_remote_file(repo: str, file_path: str, content: str, message: str = "
 
         # 2. Prepare payload
         encoded_content = base64.b64encode(content.encode("utf-8")).decode("utf-8")
+        content_size = len(content.encode("utf-8"))
         
         data = {
             "message": message,
@@ -343,8 +348,14 @@ def github_remote_file(repo: str, file_path: str, content: str, message: str = "
         if resp.status_code in [200, 201]:
             result = resp.json()
             html_url = result.get("content", {}).get("html_url", "")
+            remote_size = result.get("content", {}).get("size", 0)
             action = "updated" if sha else "created"
-            return f"Success! File {action}: {html_url}"
+            
+            # 4. Verify: check that remote size is > 0
+            if remote_size == 0:
+                return f"Warning: File {action} but remote size is 0 bytes! Content may not have been saved. URL: {html_url}"
+            
+            return f"Success! File {action} ({remote_size} bytes): {html_url}"
         else:
             return f"Error writing file: {resp.status_code} {resp.text}"
             
@@ -551,6 +562,43 @@ def write_daily_log(entry: str) -> str:
         return f"Logged to daily log"
     except Exception as e:
         return f"Error: {e}"
+
+# ============================================================
+# TOOLS: TASK ANCHORING
+# ============================================================
+
+def anchor_task(task: str, steps: str = "") -> str:
+    """
+    Save your current task plan to .workspace/CURRENT_TASK.json.
+    This protects against context window loss — the task anchor is
+    automatically injected into the system prompt on every turn.
+    Call this BEFORE starting multi-step work.
+    """
+    import datetime
+    task_file = WORKSPACE_DIR / "CURRENT_TASK.json"
+    data = {
+        "task": task,
+        "steps": steps,
+        "started": datetime.datetime.now().isoformat()
+    }
+    try:
+        task_file.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+        return f"Task anchored: {task}"
+    except Exception as e:
+        return f"Error anchoring task: {e}"
+
+
+def complete_task() -> str:
+    """Clear the current task anchor (marks task as done)."""
+    task_file = WORKSPACE_DIR / "CURRENT_TASK.json"
+    try:
+        if task_file.exists():
+            task_file.unlink()
+            return "Task completed and anchor cleared."
+        return "No active task to complete."
+    except Exception as e:
+        return f"Error clearing task: {e}"
+
 
 # ============================================================
 # TOOLS: SKILLS
@@ -1401,6 +1449,19 @@ TOOLS = [
         "name": "check_devto_key",
         "description": "Verify Dev.to API key status.",
         "parameters": {"type": "object", "properties": {}, "required": []}
+    }},
+    {"type": "function", "function": {
+        "name": "anchor_task",
+        "description": "Save current task plan to survive context loss. Call BEFORE multi-step work! The anchor is auto-injected into your system prompt.",
+        "parameters": {"type": "object", "properties": {
+            "task": {"type": "string", "description": "What you are doing (e.g. 'Publishing 2 articles to myarticles repo')"},
+            "steps": {"type": "string", "description": "Remaining steps (e.g. '1. Create skills-dev.md 2. Create xp-memory.md 3. Verify both')"}
+        }, "required": ["task"]}
+    }},
+    {"type": "function", "function": {
+        "name": "complete_task",
+        "description": "Clear the task anchor (marks current task as done).",
+        "parameters": {"type": "object", "properties": {}, "required": []}
     }}
 ]
 
@@ -1449,7 +1510,10 @@ TOOL_MAP = {
     "post_devto_article": post_devto_article,
     "update_devto_article": update_devto_article,
     "list_devto_articles": list_devto_articles,
-    "check_devto_key": check_devto_key
+    "check_devto_key": check_devto_key,
+    # Task Anchoring
+    "anchor_task": anchor_task,
+    "complete_task": complete_task
 }
 
 
