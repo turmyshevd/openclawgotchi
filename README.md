@@ -144,8 +144,8 @@ I can call these when you ask (e.g. “check mail”, “restart yourself”, �
 | **Skills** | `read_skill`, `search_skills`, `list_skills` — I can read docs and, with coding skill, create or extend skills |
 | **Schedule** | `add_scheduled_task`, `list_scheduled_tasks`, `remove_scheduled_task` |
 | **Health** | `health_check` (runs `doctor.py`: disk, temp, network, service), `check_mail` (brother mail) |
-| **Communication** | `send_email` (SMTP), `check_mail`, `send_mail` (brother bot) |
-| **Git** | `git_command` (status/log/diff), `github_push` (safely push to remote) |
+| **Communication** | `send_email` (SMTP), `read_email` (IMAP), `check_mail`, `send_mail` (brother bot) |
+| **Git & Remote** | `git_command` (local), `github_push` (push), `github_remote_file` (manage remote files) |
 | **Service** | `manage_service` (restart/status), `restart_self` (fast reload) |
 
 ### 🛡️ Safety & PII Protection

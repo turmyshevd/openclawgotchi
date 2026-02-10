@@ -895,6 +895,89 @@ def github_push(message: str = "Update from bot") -> str:
         return f"Error: {e}"
 
 
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def read_email(limit: int = 5, unread_only: bool = True) -> str:
+    """
+    Read incoming emails via IMAP.
+    Uses IMAP_HOST, IMAP_PORT (or 993), SMTP_USER, SMTP_PASS from .env.
+    limit: Max emails to retrieve (default 5).
+    unread_only: If True, only fetch UNSEEN emails.
+    """
+    import imaplib
+    import email
+    from email.header import decode_header
+    import os
+
+    host = os.environ.get("IMAP_HOST")
+    # Default IMAP port is 993 for SSL
+    port = int(os.environ.get("IMAP_PORT", 993))
+    user = os.environ.get("SMTP_USER")
+    password = os.environ.get("SMTP_PASS")
+
+    if not all([host, user, password]):
+        return "Error: IMAP_HOST, SMTP_USER, SMTP_PASS must be set in .env"
+
+    try:
+        # Connect to IMAP
+        mail = imaplib.IMAP4_SSL(host, port)
+        mail.login(user, password)
+        mail.select("inbox")
+
+        # Search
+        search_criterion = "UNSEEN" if unread_only else "ALL"
+        status, messages = mail.search(None, search_criterion)
+        
+        if status != "OK":
+            return f"Error searching emails: {status}"
+
+        email_ids = messages[0].split()
+        if not email_ids:
+            return "No emails found."
+
+        # Get latest N emails
+        email_ids = email_ids[-limit:]
+        
+        results = []
+        for e_id in reversed(email_ids):
+            _, msg_data = mail.fetch(e_id, "(RFC822)")
+            for response_part in msg_data:
+                if isinstance(response_part, tuple):
+                    msg = email.message_from_bytes(response_part[1])
+                    
+                    # Decode subject
+                    subject, encoding = decode_header(msg["Subject"])[0]
+                    if isinstance(subject, bytes):
+                        subject = subject.decode(encoding or "utf-8")
+                    
+                    # Decode sender
+                    from_ = msg.get("From")
+                    
+                    # Get body
+                    body = ""
+                    if msg.is_multipart():
+                        for part in msg.walk():
+                            if part.get_content_type() == "text/plain":
+                                body = part.get_payload(decode=True).decode()
+                                break
+                    else:
+                        body = msg.get_payload(decode=True).decode()
+                    
+                    # Truncate body
+                    body_preview = body.strip()[:200].replace("\n", " ")
+                    if len(body) > 200: body_preview += "..."
+                    
+                    results.append(f"📩 From: {from_}\n   Subj: {subject}\n   Body: {body_preview}\n")
+        
+        mail.close()
+        mail.logout()
+        return "\n".join(results)
+    except Exception as e:
+        return f"Error reading email: {e}"
+
+
 # Tool definitions
 TOOLS = [
     {"type": "function", "function": {
@@ -1093,6 +1176,34 @@ TOOLS = [
         "parameters": {"type": "object", "properties": {
             "message": {"type": "string", "description": "Commit message (default: 'Update from bot')"}
         }, "required": []}
+    }},
+    {"type": "function", "function": {
+        "name": "github_remote_file",
+        "description": "Create or update a file in a REMOTE GitHub repository without cloning. Perfect for adding articles/files to other repos.",
+        "parameters": {"type": "object", "properties": {
+            "repo": {"type": "string", "description": "Repository name (owner/repo), e.g. 'openclawgotchi/myarticles'"},
+            "file_path": {"type": "string", "description": "Path to file, e.g. 'posts/update.md'"},
+            "content": {"type": "string", "description": "File content"},
+            "message": {"type": "string", "description": "Commit message"}
+        }, "required": ["repo", "file_path", "content"]}
+    }},
+    {"type": "function", "function": {
+        "name": "github_remote_file",
+        "description": "Create or update a file in a REMOTE GitHub repository without cloning. Perfect for adding articles/files to other repos.",
+        "parameters": {"type": "object", "properties": {
+            "repo": {"type": "string", "description": "Repository name (owner/repo), e.g. 'openclawgotchi/myarticles'"},
+            "file_path": {"type": "string", "description": "Path to file, e.g. 'posts/update.md'"},
+            "content": {"type": "string", "description": "File content"},
+            "message": {"type": "string", "description": "Commit message"}
+        }, "required": ["repo", "file_path", "content"]}
+    }},
+    {"type": "function", "function": {
+        "name": "read_email",
+        "description": "Read incoming emails via IMAP. Useful for checking instructions or replies.",
+        "parameters": {"type": "object", "properties": {
+            "limit": {"type": "integer", "description": "Max emails to fetch (default 5)"},
+            "unread_only": {"type": "boolean", "description": "Fetch only unread? (default True)"}
+        }, "required": []}
     }}
 ]
 
@@ -1125,6 +1236,8 @@ TOOL_MAP = {
     "send_mail": send_mail,
     "send_email": send_email,
     "github_push": github_push,
+    "github_remote_file": github_remote_file,
+    "read_email": read_email,
 }
 
 
@@ -1139,6 +1252,8 @@ _TOOL_ICONS = {
     "send_mail": "📧",
     "send_email": "📩",
     "github_push": "🚀",
+    "github_remote_file": "🌐",
+    "read_email": "cw",
     "remember_fact": "🧠",
     "recall_facts": "🔍",
     "recall_messages": "💬",
