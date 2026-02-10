@@ -474,6 +474,54 @@ def recall_facts(query: str = "", limit: int = 10) -> str:
     except Exception as e:
         return f"Error: {e}"
 
+def search_memory(query: str, days: int = 30) -> str:
+    """
+    Deep search of memory:
+    1. Facts (database)
+    2. Daily Logs (files, last N days)
+    """
+    import logging
+    log = logging.getLogger("memory_search")
+    
+    query = query.strip()
+    if not query:
+        return "Error: Empty query"
+    
+    results = []
+    
+    # 1. Search Facts
+    try:
+        from db.memory import search_facts
+        facts = search_facts(query, limit=5)
+        if facts:
+            results.append("### 🧠 Facts (Long-term DB)")
+            for f in facts:
+                date = f.get('timestamp', '').split('T')[0]
+                results.append(f"- [{f['category']}] {f['content']} ({date})")
+            results.append("")
+    except Exception as e:
+        log.warning(f"Fact search failed: {e}")
+
+    # 2. Search Daily Logs
+    try:
+        from memory.flush import search_daily_logs
+        logs = search_daily_logs(query, days=days)
+        if logs:
+            results.append(f"### 📅 Daily Logs (Last {days} days)")
+            # Limit to 10 most recent matches
+            for line in logs[:10]:
+                results.append(f"- {line}")
+            if len(logs) > 10:
+                results.append(f"... and {len(logs)-10} more matches.")
+            results.append("")
+    except Exception as e:
+        log.warning(f"Log search failed: {e}")
+        
+    if not results:
+        return f"No memory found for '{query}'."
+        
+    return "\n".join(results)
+
 def recall_messages(limit: int = 20) -> str:
     """Look back at recent conversation messages."""
     try:
@@ -1200,6 +1248,14 @@ TOOLS = [
         }, "required": []}
     }},
     {"type": "function", "function": {
+        "name": "search_memory",
+        "description": "Deep search of memory (facts + daily logs). Use this to find past events.",
+        "parameters": {"type": "object", "properties": {
+            "query": {"type": "string", "description": "Search term"},
+            "days": {"type": "integer", "description": "How many days back to search logs (default 30)"}
+        }, "required": ["query"]}
+    }},
+    {"type": "function", "function": {
         "name": "write_daily_log",
         "description": "Add entry to today's log",
         "parameters": {"type": "object", "properties": {
@@ -1367,6 +1423,7 @@ TOOL_MAP = {
     "remember_fact": remember_fact,
     "recall_facts": recall_facts,
     "recall_messages": recall_messages,
+    "search_memory": search_memory,
     "write_daily_log": write_daily_log,
     # Skills
     "read_skill": read_skill,
