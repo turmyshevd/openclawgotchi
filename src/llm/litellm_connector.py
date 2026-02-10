@@ -897,6 +897,26 @@ def add_custom_face(name: str, kaomoji: str) -> str:
         return f"Error: {e}"
 
 
+def health_check() -> str:
+    """
+    Run system health check. Use this to diagnose problems!
+    Checks: internet, disk, temp, service status, recent errors.
+    """
+    try:
+        from pathlib import Path
+        import subprocess
+        # Assumes PROJECT_DIR is available (imported at top)
+        # Re-importing inside just in case for clarity, though not needed if at top
+        
+        result = subprocess.run(
+            ["python3", str(PROJECT_DIR / "src" / "utils" / "doctor.py")],
+            capture_output=True, text=True, timeout=30
+        )
+        return result.stdout + (f"\n{result.stderr}" if result.stderr else "")
+    except Exception as e:
+        return f"Error running health check: {e}"
+
+
 # ============================================================
 # UI HELPERS (TOOL LOGGING)
 # ============================================================
