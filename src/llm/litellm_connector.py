@@ -947,6 +947,9 @@ _TOOL_ICONS = {
     "list_scheduled_tasks": "📅",
     "search_skills": "🔎",
     "read_skill": "📖",
+    "post_devto_article": "📝",
+    "list_devto_articles": "📚",
+    "check_devto_key": "🔑",
 }
 
 def _format_tool_action(func_name: str, args: dict, result: str) -> str:
@@ -1027,6 +1030,60 @@ def _build_tool_footer(actions: List[str]) -> str:
     lines.append("```")
     
     return "\n".join(lines)
+
+# ============================================================
+# TOOLS: DEV.TO
+# ============================================================
+
+def post_devto_article(title: str, body_markdown: str, tags: List[str] = None, published: bool = False) -> str:
+    """Post article to Dev.to."""
+    try:
+        from skills.devto import post_article
+        result = post_article(title, body_markdown, published=published, tags=tags)
+        if "error" in result:
+            return f"Error: {result['error']}"
+        return f"✓ Posted article: {result.get('url')} (ID: {result.get('id')})"
+    except Exception as e:
+        return f"Error: {e}"
+
+def update_devto_article(article_id: int, title: str = None, body_markdown: str = None, published: bool = None, tags: List[str] = None) -> str:
+    """Update Dev.to article."""
+    try:
+        from skills.devto import update_article
+        result = update_article(article_id, title, body_markdown, published, tags)
+        if "error" in result:
+            return f"Error: {result['error']}"
+        return f"✓ Updated article {article_id}: {result.get('url')}"
+    except Exception as e:
+        return f"Error: {e}"
+
+def list_devto_articles(limit: int = 10) -> str:
+    """List my Dev.to articles."""
+    try:
+        from skills.devto import get_my_articles
+        articles = get_my_articles(per_page=limit)
+        if isinstance(articles, list) and articles and "error" in articles[0]:
+             return f"Error: {articles[0]['error']}"
+        
+        if not articles:
+            return "No articles found."
+            
+        lines = [f"My Dev.to Articles ({len(articles)}):"]
+        for a in articles:
+            status = "Published" if a.get("published") else "Draft"
+            lines.append(f"- [{a.get('id')}] {a.get('title')} ({status})")
+            lines.append(f"  URL: {a.get('url')}")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Error: {e}"
+
+def check_devto_key() -> str:
+    """Check Dev.to API key status."""
+    try:
+        from skills.devto import check_api_key
+        return check_api_key()
+    except Exception as e:
+        return f"Error: {e}"
 
 # ============================================================
 # TOOL DEFINITIONS & MAPPING
@@ -1255,6 +1312,39 @@ TOOLS = [
         "name": "health_check",
         "description": "Run system health check.",
         "parameters": {"type": "object", "properties": {}, "required": []}
+    }},
+    {"type": "function", "function": {
+        "name": "post_devto_article",
+        "description": "Post a new article to Dev.to.",
+        "parameters": {"type": "object", "properties": {
+            "title": {"type": "string", "description": "Article title"},
+            "body_markdown": {"type": "string", "description": "Content in Markdown"},
+            "tags": {"type": "array", "items": {"type": "string"}, "description": "Tags (max 4)"},
+            "published": {"type": "boolean", "description": "True to publish, False for draft"}
+        }, "required": ["title", "body_markdown"]}
+    }},
+    {"type": "function", "function": {
+        "name": "update_devto_article",
+        "description": "Update an existing Dev.to article.",
+        "parameters": {"type": "object", "properties": {
+            "article_id": {"type": "integer", "description": "ID of article to update"},
+            "title": {"type": "string"},
+            "body_markdown": {"type": "string"},
+            "published": {"type": "boolean"},
+            "tags": {"type": "array", "items": {"type": "string"}}
+        }, "required": ["article_id"]}
+    }},
+    {"type": "function", "function": {
+        "name": "list_devto_articles",
+        "description": "List my recent Dev.to articles.",
+        "parameters": {"type": "object", "properties": {
+            "limit": {"type": "integer", "description": "Max articles (default 10)"}
+        }, "required": []}
+    }},
+    {"type": "function", "function": {
+        "name": "check_devto_key",
+        "description": "Verify Dev.to API key status.",
+        "parameters": {"type": "object", "properties": {}, "required": []}
     }}
 ]
 
@@ -1297,7 +1387,12 @@ TOOL_MAP = {
     # Hardware
     "show_face": show_face,
     "add_custom_face": add_custom_face,
-    "health_check": health_check
+    "health_check": health_check,
+    # Dev.to
+    "post_devto_article": post_devto_article,
+    "update_devto_article": update_devto_article,
+    "list_devto_articles": list_devto_articles,
+    "check_devto_key": check_devto_key
 }
 
 
