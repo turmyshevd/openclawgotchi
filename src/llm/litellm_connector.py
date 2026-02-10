@@ -738,10 +738,12 @@ def git_command(command: str) -> str:
     
     command = command.strip()
     
-    # Block destructive remote operations
-    blocked = ["push --force", "push -f", "reset --hard HEAD~", "clean -fd"]
+    # Block remote operations (use github_push for push)
+    blocked = ["push", "push --force", "push -f", "reset --hard HEAD~", "clean -fd"]
     for b in blocked:
-        if b in command:
+        if command == b or command.startswith(b + " "):
+            if "push" in b:
+                return "Error: Use github_push() tool instead — it handles authentication."
             return f"Error: '{b}' is blocked for safety. Ask the owner."
     
     full_cmd = f"git {command}"
@@ -792,6 +794,103 @@ def manage_service(service: str, action: str = "status") -> str:
         )
         output = (result.stdout + result.stderr).strip()
         return output or f"Service {service}: {action} done"
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def send_email(to: str, subject: str, body: str) -> str:
+    """
+    Send an email via SMTP. Uses SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS from .env.
+    Use for notifications, reports, or when the user asks to send an email.
+    """
+    if not to or not subject:
+        return "Error: 'to' and 'subject' required"
+    
+    import os
+    host = os.environ.get("SMTP_HOST")
+    port = os.environ.get("SMTP_PORT")
+    user = os.environ.get("SMTP_USER")
+    password = os.environ.get("SMTP_PASS")
+    
+    if not all([host, port, user, password]):
+        return "Error: SMTP not configured. Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS in .env"
+    
+    try:
+        import smtplib
+        from email.message import EmailMessage
+        
+        msg = EmailMessage()
+        msg["From"] = user
+        msg["To"] = to
+        msg["Subject"] = subject
+        msg.set_content(body or "")
+        
+        with smtplib.SMTP_SSL(host, int(port)) as smtp:
+            smtp.login(user, password)
+            smtp.send_message(msg)
+        
+        return f"Email sent to {to} ✓"
+    except Exception as e:
+        return f"Error sending email: {e}"
+
+
+def github_push(message: str = "Update from bot") -> str:
+    """
+    Push local git changes to the GitHub remote.
+    Uses GITHUB_TOKEN from .env for authentication.
+    Stages all changes, commits with the given message, and pushes.
+    """
+    import os
+    token = os.environ.get("GITHUB_TOKEN")
+    if not token:
+        return "Error: GITHUB_TOKEN not set in .env"
+    
+    try:
+        # Check for changes
+        result = subprocess.run(
+            "git status --porcelain", shell=True,
+            capture_output=True, text=True, cwd=str(PROJECT_DIR)
+        )
+        if not result.stdout.strip():
+            return "No changes to push."
+        
+        # Stage all
+        subprocess.run(
+            "git add -A", shell=True, check=True, cwd=str(PROJECT_DIR),
+            capture_output=True
+        )
+        
+        # Commit
+        subprocess.run(
+            ["git", "commit", "-m", message],
+            check=True, cwd=str(PROJECT_DIR), capture_output=True
+        )
+        
+        # Get current remote URL and inject token
+        result = subprocess.run(
+            "git remote get-url origin", shell=True,
+            capture_output=True, text=True, cwd=str(PROJECT_DIR)
+        )
+        remote_url = result.stdout.strip()
+        
+        # Build authenticated URL
+        if "github.com" in remote_url:
+            # https://github.com/user/repo.git -> https://TOKEN@github.com/user/repo.git
+            auth_url = remote_url.replace("https://", f"https://{token}@")
+            
+            result = subprocess.run(
+                ["git", "push", auth_url, "main"],
+                capture_output=True, text=True, timeout=60,
+                cwd=str(PROJECT_DIR)
+            )
+            if result.returncode == 0:
+                return f"Pushed to GitHub ✓ ({message})"
+            else:
+                return f"Push failed: {result.stderr[:200]}"
+        else:
+            return f"Error: Remote is not GitHub: {remote_url}"
+    except subprocess.CalledProcessError as e:
+        return f"Error: {e.stderr[:200] if e.stderr else str(e)}"
     except Exception as e:
         return f"Error: {e}"
 
@@ -938,7 +1037,7 @@ TOOLS = [
     }},
     {"type": "function", "function": {
         "name": "check_mail",
-        "description": "Check unread mail from sibling/brother bot. Use when user asks to check mail, check mail from brother, or check messages. Mail is in the same DB as the bot (gotchi.db). Do NOT invent paths like probro.db.",
+        "description": "Check unread mail from sibling/brother bot. Use when user asks to check mail or messages.",
         "parameters": {"type": "object", "properties": {}, "required": []}
     }},
     {"type": "function", "function": {
@@ -966,7 +1065,7 @@ TOOLS = [
     }},
     {"type": "function", "function": {
         "name": "git_command",
-        "description": "Run a git command in the project repo. Use for: status, log, diff, add, commit, branch, stash. Always commit after making code changes.",
+        "description": "Run a git command in the project repo. Use for: status, log, diff, add, commit, branch, stash. For push, use github_push() instead.",
         "parameters": {"type": "object", "properties": {
             "command": {"type": "string", "description": "Git command without 'git' prefix (e.g. 'status', 'log --oneline -5', 'add -A', 'commit -m \"fix: typo\"')"}
         }, "required": ["command"]}
@@ -978,6 +1077,22 @@ TOOLS = [
             "service": {"type": "string", "description": "Service name (default: gotchi-bot)"},
             "action": {"type": "string", "description": "Action: status, restart, stop, start, logs"}
         }, "required": ["service"]}
+    }},
+    {"type": "function", "function": {
+        "name": "send_email",
+        "description": "Send an email via SMTP. Requires SMTP settings in .env. Use for notifications or when user asks to send an email.",
+        "parameters": {"type": "object", "properties": {
+            "to": {"type": "string", "description": "Recipient email address"},
+            "subject": {"type": "string", "description": "Email subject"},
+            "body": {"type": "string", "description": "Email body text"}
+        }, "required": ["to", "subject", "body"]}
+    }},
+    {"type": "function", "function": {
+        "name": "github_push",
+        "description": "Push local git changes to GitHub remote. Stages all changes, commits, and pushes. Requires GITHUB_TOKEN in .env.",
+        "parameters": {"type": "object", "properties": {
+            "message": {"type": "string", "description": "Commit message (default: 'Update from bot')"}
+        }, "required": []}
     }}
 ]
 
@@ -1008,6 +1123,8 @@ TOOL_MAP = {
     "restore_from_backup": restore_from_backup,
     "check_mail": check_mail,
     "send_mail": send_mail,
+    "send_email": send_email,
+    "github_push": github_push,
 }
 
 
@@ -1020,6 +1137,8 @@ _TOOL_ICONS = {
     "show_face": "😎",
     "check_mail": "📬",
     "send_mail": "📧",
+    "send_email": "📩",
+    "github_push": "🚀",
     "remember_fact": "🧠",
     "recall_facts": "🔍",
     "recall_messages": "💬",

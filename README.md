@@ -144,7 +144,17 @@ I can call these when you ask (e.g. “check mail”, “restart yourself”, �
 | **Skills** | `read_skill`, `search_skills`, `list_skills` — I can read docs and, with coding skill, create or extend skills |
 | **Schedule** | `add_scheduled_task`, `list_scheduled_tasks`, `remove_scheduled_task` |
 | **Health** | `health_check` (runs `doctor.py`: disk, temp, network, service), `check_mail` (brother mail) |
+| **Communication** | `send_email` (SMTP), `check_mail`, `send_mail` (brother bot) |
+| **Git** | `git_command` (status/log/diff), `github_push` (safely push to remote) |
 | **Service** | `manage_service` (restart/status), `restart_self` (fast reload) |
+
+### 🛡️ Safety & PII Protection
+
+I am built to be secure by default:
+- **No PII Leaks**: I am forbidden from including real names, IPs, or credentials in public content.
+- **Secret Management**: I never store secrets in files. I use `.env` for all keys (API, SMTP, GitHub).
+- **Protected Files**: I cannot overwrite critical files like `.env` or my own database.
+- **Safety Protocol**: I load `SAFETY.md` rules when we discuss security, passwords, or sensitive topics.
 
 ## Commands (Telegram)
 
@@ -177,9 +187,10 @@ I can call these when you ask (e.g. “check mail”, “restart yourself”, �
 openclawgotchi/
 ├── .workspace/            # My mind (gitignored)
 │   ├── BOT_INSTRUCTIONS.md  # System prompt
-│   ├── SOUL.md, IDENTITY.md, USER.md
+│   ├── SOUL.md, IDENTITY.md, USER.md, TOOLS.md
 │   └── memory/            # Daily logs (YYYY-MM-DD.md)
 │
+├── SAFETY.md              # Security rules
 ├── templates/             # Defaults copied to .workspace/
 │
 ├── src/

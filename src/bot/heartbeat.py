@@ -42,7 +42,7 @@ def _sanitize_reflection_text(text: str) -> str:
             continue
         if lower.startswith("**system") or lower.startswith("system:"):
             continue
-        if lower.startswith("**рефлек") or lower.startswith("рефлек"):
+        if lower.startswith("**reflection") or lower.startswith("reflection"):
             continue
         if stripped.startswith("---"):
             continue
@@ -403,7 +403,7 @@ async def send_heartbeat(context):
         reflection_text = _sanitize_reflection_text(clean_text)
         if not reflection_text:
             # Fallback to a minimal reflection so heartbeat always speaks
-            reflection_text = "Тихие часы. Я здесь и продолжаю думать."
+            reflection_text = "Quiet hours. I'm here, still thinking."
         
         # Save reflection to daily log (always, even if no commands)
         if reflection_text:
@@ -451,7 +451,7 @@ async def send_heartbeat(context):
         try:
             target_chat_id = _get_heartbeat_target_chat_id()
             if target_chat_id:
-                await send_message(context.bot, target_chat_id, "Тихо. Я здесь и продолжаю думать.")
+                await send_message(context.bot, target_chat_id, "Quiet. I'm here, still thinking.")
         except Exception:
             pass
         run_hook(HookEvent(event_type="heartbeat", action="error", text=str(e)))
