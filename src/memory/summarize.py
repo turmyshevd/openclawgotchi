@@ -9,7 +9,7 @@ from typing import List, Dict
 
 log = logging.getLogger(__name__)
 
-VERBATIM_COUNT = 5  # Keep last 5 messages as-is
+VERBATIM_COUNT = 20  # Keep last 20 messages as-is
 
 
 def extract_key_info(content: str, role: str) -> str:
