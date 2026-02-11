@@ -8,9 +8,6 @@
 # External skills (clone separately if needed)
 openclaw-skills/
 
-# Archive (unused files)
-archive/
-
 # ===================
 # Python
 # ===================
@@ -115,5 +112,4 @@ sync.sh
 refresh_remote_token.sh
 
 # Personal commands
-.claude/
-.gemini/
+.claude/commands/

@@ -13,7 +13,7 @@ metadata:
 
 # Logging
 
-You have several log sinks. Use them so you (and the owner) can see what broke and when.
+You have several log sinks. Use them so you (and Dmitry) can see what broke and when.
 
 ## Where logs are
 

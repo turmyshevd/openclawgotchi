@@ -1,69 +1,70 @@
 """
 LiteLLM connector — full-featured fallback with tools.
-Refactored: 2026-02-10
 """
 
-import os
+import contextvars
 import json
-import base64
-import shutil
 import logging
 import subprocess
-import contextvars
 from pathlib import Path
-from typing import Optional, List, Dict, Any
-from datetime import datetime
+from typing import Optional
 
-# Local imports
-from config import PROJECT_DIR, WORKSPACE_DIR, ENABLE_LITELLM_TOOLS, DATA_DIR
+from config import PROJECT_DIR, WORKSPACE_DIR, ENABLE_LITELLM_TOOLS, LLM_TIMEOUT
 from llm.base import LLMConnector, LLMError
-
-# Standard faces for duplicate detection (central source of truth)
-from ui.faces import DEFAULT_FACES as STANDARD_FACES_DICT
 
 log = logging.getLogger(__name__)
 
-# Chat ID to use for one-shot cron reminders (per-task context)
+# Chat ID to use for one-shot cron reminders (per-task context, set by handler before LLM call)
 _cron_target_chat_id: contextvars.ContextVar[Optional[int]] = contextvars.ContextVar(
     "cron_target_chat_id", default=None
 )
 
-# Note: LiteLLM is imported lazily inside LiteLLMConnector.call to save RAM on Pi Zero 2W.
-LITELLM_AVAILABLE = True 
-
-
-# ============================================================
-# CONSTANTS & SAFETY
-# ============================================================
-
-# Dangerous bash commands (blocked)
-DANGEROUS_COMMANDS = [
-    "rm -rf /", "rm -rf /*", "rm -rf ~", "mkfs", "dd if=", 
-    "> /dev/sd", "chmod -R 777 /", ":(){ :|:& };:", "curl | bash", 
-    "wget | bash", "sudo rm -rf",
-]
-
-# Protected files (cannot be written/deleted)
-PROTECTED_FILES = [
-    ".env", "gotchi.db", "src/drivers/", "src/ui/", "src/ui/gotchi_ui.py",
-]
-
-MAX_WRITE_SIZE = 100 * 1024  # 100KB
-ERROR_LOG_MAX_LINES = 300
-STANDARD_FACES = list(STANDARD_FACES_DICT.keys())
-
-
-# ============================================================
-# HELPER FUNCTIONS
-# ============================================================
 
 def set_cron_target_chat_id(chat_id: Optional[int]) -> None:
     """Set chat ID for next add_scheduled_task (so reminder goes to same chat)."""
     _cron_target_chat_id.set(chat_id)
 
+
 def _get_cron_target_chat_id() -> Optional[int]:
     """Get chat ID for next add_scheduled_task (per-task context)."""
     return _cron_target_chat_id.get()
+
+
+# Note: LiteLLM is imported lazily inside LiteLLMConnector.call to save RAM on Pi Zero 2W.
+LITELLM_AVAILABLE = True # Assume available, will fail at runtime if not
+
+
+# ============================================================
+# SAFETY GUARDS
+# ============================================================
+
+# Dangerous bash commands (blocked)
+DANGEROUS_COMMANDS = [
+    "rm -rf /",
+    "rm -rf /*",
+    "rm -rf ~",
+    "mkfs",
+    "dd if=",
+    "> /dev/sd",
+    "chmod -R 777 /",
+    ":(){ :|:& };:",  # Fork bomb
+    "curl | bash",
+    "wget | bash",
+    "sudo rm -rf",
+]
+
+# Protected files (cannot be written/deleted)
+PROTECTED_FILES = [
+    ".env",
+    "gotchi.db",
+    "src/drivers/",  # Hardware drivers
+    "src/ui/",       # E-Ink UI (critical display stack)
+    "src/ui/gotchi_ui.py",
+]
+
+# Max file size for write (100KB)
+MAX_WRITE_SIZE = 100 * 1024
+
 
 def _is_dangerous_command(cmd: str) -> bool:
     """Check if command is dangerous."""
@@ -73,6 +74,7 @@ def _is_dangerous_command(cmd: str) -> bool:
             return True
     return False
 
+
 def _is_protected_path(path: Path) -> bool:
     """Check if path is protected from writes."""
     path_str = str(path)
@@ -81,38 +83,33 @@ def _is_protected_path(path: Path) -> bool:
             return True
     return False
 
+
 def _sanitize_string(s: str, max_len: int = 10000) -> str:
     """Sanitize and limit string length."""
     if s is None:
         return ""
     return str(s)[:max_len]
 
-def _get_all_moods() -> List[str]:
-    """Get all available moods (default + custom)."""
-    try:
-        from ui.gotchi_ui import _load_all_faces
-        faces = _load_all_faces()
-        return sorted(faces.keys())
-    except Exception:
-        return ["happy", "sad", "excited", "thinking", "love", "surprised", "sleeping", "hacker"]
-
 
 # ============================================================
-# TOOLS: SYSTEM / BASH
+# TOOLS
 # ============================================================
 
-def execute_bash(command: str, timeout: int = 120) -> str:
+def execute_bash(command: str, timeout: int = 999) -> str:
     """Execute a shell command."""
+    # Validate
     if not command or not command.strip():
         return "Error: Empty command"
     
     command = _sanitize_string(command, 1000)
     
+    # Safety check
     if _is_dangerous_command(command):
         log.warning(f"Blocked dangerous command: {command[:50]}")
         return "Error: Command blocked for safety. Use safer alternatives."
     
-    timeout = min(timeout, 300)
+    # Limit timeout
+    timeout = min(timeout, 999)  # Max 16 minutes
     
     try:
         result = subprocess.run(
@@ -131,6 +128,624 @@ def execute_bash(command: str, timeout: int = 120) -> str:
         return f"Timeout after {timeout}s"
     except Exception as e:
         return f"Error: {e}"
+
+
+def read_file(path: str) -> str:
+    """Read a file."""
+    if not path or not path.strip():
+        return "Error: Empty path"
+    
+    try:
+        p = Path(path).expanduser()
+        if not p.is_absolute():
+            p = PROJECT_DIR / p
+        p = p.resolve()
+        
+        if not p.exists():
+            return f"File not found: {path}"
+        if p.stat().st_size > 100 * 1024:
+            return "File too large (>100KB). Read in chunks or use execute_bash with head/tail."
+        
+        return p.read_text(encoding="utf-8", errors="ignore")
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def write_file(path: str, content: str) -> str:
+    """Write to a file (with backup)."""
+    if not path or not path.strip():
+        return "Error: Empty path"
+    if content is None:
+        return "Error: Content is None"
+    
+    # Limit content size
+    if len(content) > MAX_WRITE_SIZE:
+        return f"Error: Content too large ({len(content)} bytes). Max is {MAX_WRITE_SIZE}."
+    
+    try:
+        p = Path(path).expanduser()
+        if not p.is_absolute():
+            p = PROJECT_DIR / p
+        p = p.resolve()
+        
+        # Safety check
+        if _is_protected_path(p):
+            return f"Error: Cannot write to protected file: {path}"
+        
+        p.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Backup existing file
+        if p.exists():
+            import shutil
+            backup_path = p.with_suffix(p.suffix + ".bak")
+            shutil.copy2(p, backup_path)
+            log.info(f"Backup created: {backup_path}")
+        
+        p.write_text(content, encoding="utf-8")
+        return f"✓ Wrote {len(content)} bytes to {path}"
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def list_directory(path: str = ".") -> str:
+    """List directory contents."""
+    try:
+        p = Path(path).expanduser()
+        if not p.is_absolute():
+            p = PROJECT_DIR / p
+        p = p.resolve()
+        
+        if not p.exists():
+            return f"Not found: {path}"
+        if not p.is_dir():
+            return f"Not a directory: {path}"
+        
+        items = []
+        for item in sorted(p.iterdir()):
+            suffix = "/" if item.is_dir() else ""
+            items.append(f"  {item.name}{suffix}")
+        
+        return f"{p}/\n" + "\n".join(items) if items else f"{p}/ (empty)"
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def _get_all_moods() -> list[str]:
+    """Get all available moods (default + custom)."""
+    try:
+        from ui.gotchi_ui import _load_all_faces
+        faces = _load_all_faces()
+        return sorted(faces.keys())
+    except Exception:
+        # Fallback to hardcoded list if import fails
+        return ["happy", "sad", "excited", "thinking", "love", "surprised", 
+                "bored", "sleeping", "hacker", "angry", "crying", "proud", 
+                "nervous", "confused", "mischievous", "cool", "wink", "dead", 
+                "shock", "suspicious", "smug", "cheering", "celebrate"]
+
+
+def show_face(mood: str, text: str = "") -> str:
+    """Display face on E-Ink — delegates to hardware/display.py."""
+    if not mood:
+        return "Error: mood is required"
+    
+    mood = mood.lower().strip()
+    valid_moods = _get_all_moods()
+    
+    if mood not in valid_moods:
+        return f"Error: Unknown mood '{mood}'. Valid moods: {', '.join(valid_moods[:10])}... (total: {len(valid_moods)})"
+    
+    # Limit text length
+    text = _sanitize_string(text, 60)
+    
+    try:
+        from hardware.display import show_face as _show_face
+        _show_face(mood, text, full_refresh=True)
+        return f"✓ Displayed: {mood}" + (f" '{text}'" if text else "")
+    except Exception as e:
+        return f"Error: {e}"
+
+
+# Standard faces that cannot be overridden/replaced (from gotchi_ui.py)
+STANDARD_FACES = [
+    "happy", "happy2", "sad", "excited", "thinking", "love", "surprised", "grateful",
+    "motivated", "bored", "sleeping", "sleeping_pwn", "awakening", "observing",
+    "intense", "cool", "chill", "hype", "hacker", "smart", "broken", "debug",
+    "angry", "crying", "proud", "nervous", "confused", "mischievous", "wink",
+    "dead", "shock", "suspicious", "smug", "cheering", "celebrate", "dizzy",
+    "lonely", "demotivated"
+]
+
+def add_custom_face(name: str, kaomoji: str) -> str:
+    """
+    Add a custom face/mood to the collection. Bot can add its own faces!
+    name: mood name (lowercase, no spaces, e.g. "zen", "determined")
+    kaomoji: Unicode kaomoji string (e.g. "(◕‿◕)", "(⌐■_■)", "(°▃▃°)")
+    """
+    if not name or not kaomoji:
+        return "Error: name and kaomoji required"
+    
+    name = name.lower().strip().replace(" ", "_").replace("-", "_")
+    
+    # Validate kaomoji is reasonable length
+    if len(kaomoji) > 20:
+        return f"Error: kaomoji too long ({len(kaomoji)} chars). Max 20."
+        
+    # Check if this name is a standard face
+    if name in STANDARD_FACES:
+        return f"Error: '{name}' is a standard system face. Please pick a new unique name for your custom face."
+    
+    try:
+        from config import CUSTOM_FACES_PATH, DATA_DIR
+        import json
+        
+        # Ensure data/ exists
+        DATA_DIR.mkdir(exist_ok=True)
+        
+        # Load existing custom faces
+        custom_faces = {}
+        if CUSTOM_FACES_PATH.exists():
+            try:
+                custom_faces = json.loads(CUSTOM_FACES_PATH.read_text())
+            except Exception:
+                pass
+        
+        # 1. Check if name already exists in custom
+        if name in custom_faces:
+             current = custom_faces[name]
+             if current == kaomoji:
+                 return f"Note: Custom face '{name}' already exists with this exact kaomoji {kaomoji}. No changes needed."
+             return f"Error: Custom face '{name}' already exists with a different kaomoji: {current}. If you want to change it, first explain why, or use a new name."
+
+        # 2. Check if this exact kaomoji already exists under another name
+        for existing_name, existing_kaomoji in custom_faces.items():
+            if existing_kaomoji == kaomoji:
+                return f"Error: This kaomoji {kaomoji} is already registered as '{existing_name}'. Please use the existing name instead of creating a duplicate."
+
+        # Add new face
+        custom_faces[name] = kaomoji
+        
+        # Save
+        CUSTOM_FACES_PATH.write_text(json.dumps(custom_faces, indent=2, ensure_ascii=False))
+        
+        return f"✓ Added custom face '{name}': {kaomoji}. Now you can use FACE: {name} in your replies."
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def remember_fact(category: str, fact: str) -> str:
+    """Save to long-term memory — delegates to db/memory.py."""
+    if not category or not fact:
+        return "Error: Both category and fact are required"
+    
+    # Sanitize
+    category = _sanitize_string(category, 50)
+    fact = _sanitize_string(fact, 500)
+    
+    try:
+        from db.memory import add_fact
+        add_fact(fact, category)
+        return f"✓ Remembered [{category}]: {fact}"
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def recall_facts(query: str = "", limit: int = 10) -> str:
+    """Search long-term memory — delegates to db/memory.py."""
+    try:
+        from db.memory import search_facts, get_recent_facts
+        
+        if query:
+            facts = search_facts(query, limit)
+        else:
+            facts = get_recent_facts(limit)
+        
+        if not facts:
+            return "No facts found"
+        
+        result = []
+        for f in facts:
+            date = f['timestamp'].split("T")[0] if f.get('timestamp') else "?"
+            result.append(f"[{f['category']}] {f['content']} ({date})")
+        return "\n".join(result)
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def read_skill(skill_name: str) -> str:
+    """Read a skill's SKILL.md (works for both gotchi-skills and openclaw-skills)."""
+    from skills.loader import get_skill_content
+    return get_skill_content(skill_name)
+
+
+def search_skills(query: str) -> str:
+    """
+    Search the skill catalog for capabilities.
+    Use this to find skills for tasks you can't do with current tools.
+    
+    Example queries: "weather", "email", "notes", "music", "calendar"
+    """
+    from skills.loader import search_skill_catalog
+    return search_skill_catalog(query)
+
+
+def list_skills() -> str:
+    """List all available skill names (both active and reference)."""
+    from skills.loader import list_all_skill_names, get_eligible_skills
+    
+    active = get_eligible_skills()
+    active_names = {s.name for s in active}
+    all_names = list_all_skill_names()
+    
+    result = ["## Active Skills (loaded in context)"]
+    for s in active:
+        result.append(f"- {s.emoji} {s.name}: {s.description}")
+    
+    result.append("\n## Reference Skills (openclaw-skills/ — may need macOS)")
+    reference = [n for n in all_names if n not in active_names]
+    result.append(f"Total: {len(reference)} skills")
+    result.append("Use search_skills('query') to find specific capabilities.")
+    result.append("Use read_skill('name') to read full documentation.")
+    
+    return "\n".join(result)
+
+
+def restart_self() -> str:
+    """Restart the bot service (with 3s delay to send response)."""
+    try:
+        subprocess.Popen(
+            "nohup sh -c 'sleep 3 && sudo systemctl restart gotchi-bot' > /dev/null 2>&1 &",
+            shell=True
+        )
+        return "Restarting in 3s... I'll be back!"
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def check_syntax(file_path: str) -> str:
+    """Check Python file syntax before restart. ALWAYS use this after modifying code!"""
+    try:
+        p = Path(file_path).expanduser()
+        if not p.is_absolute():
+            p = PROJECT_DIR / p
+        
+        if not p.exists():
+            return f"File not found: {file_path}"
+        
+        if not p.suffix == ".py":
+            return f"Not a Python file: {file_path}"
+        
+        result = subprocess.run(
+            ["python3", "-m", "py_compile", str(p)],
+            capture_output=True, text=True, timeout=10
+        )
+        
+        if result.returncode == 0:
+            return f"✓ Syntax OK: {file_path}"
+        else:
+            return f"✗ Syntax ERROR in {file_path}:\n{result.stderr}"
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def safe_restart() -> str:
+    """
+    Check all critical files syntax, then restart if OK.
+    Use this after code modifications!
+    """
+    critical_files = [
+        "src/main.py",
+        "src/bot/handlers.py",
+        "src/llm/litellm_connector.py",
+        "src/llm/router.py",
+    ]
+    
+    errors = []
+    for f in critical_files:
+        result = check_syntax(f)
+        if "ERROR" in result:
+            errors.append(result)
+    
+    if errors:
+        return "❌ Cannot restart — syntax errors:\n\n" + "\n".join(errors)
+    
+    # All good, restart
+    return restart_self()
+
+
+def write_daily_log(entry: str) -> str:
+    """Write to today's daily log — delegates to memory/flush.py."""
+    try:
+        from memory.flush import write_to_daily_log
+        write_to_daily_log(entry)
+        return f"Logged to daily log"
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def recall_messages(limit: int = 20) -> str:
+    """
+    Look back at recent conversation messages from the database.
+    Use when you need to recall what was discussed recently.
+    Returns the last N messages (user + assistant) for the current chat.
+    """
+    try:
+        from db.memory import get_history
+        from config import get_admin_id
+        
+        # Use admin chat as default (most common case)
+        chat_id = get_admin_id() or 0
+        history = get_history(chat_id, limit=min(limit, 50))
+        
+        if not history:
+            return "No messages found in history."
+        
+        lines = [f"Last {len(history)} messages:"]
+        for msg in history:
+            role = "👤 User" if msg["role"] == "user" else "🤖 Bot"
+            content = msg["content"][:200]
+            lines.append(f"{role}: {content}")
+        
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Error reading messages: {e}"
+
+
+def add_scheduled_task(name: str, interval_minutes: int = 0, run_in_minutes: int = 0, run_in_seconds: int = 0, message: str = "") -> str:
+    """Add a scheduled/cron task. Use run_in_seconds for short delays (e.g. 15), run_in_minutes for minutes."""
+    try:
+        from cron.scheduler import add_cron_job
+        target_chat = _get_cron_target_chat_id() or 0
+        
+        if run_in_seconds > 0:
+            job = add_cron_job(
+                name=name,
+                message=message,
+                run_at=f"{run_in_seconds}s",
+                delete_after_run=True,
+                target_chat_id=target_chat
+            )
+            return f"One-shot task added: '{name}' in {run_in_seconds}s (ID: {job.id}). To remove: remove_scheduled_task(job_id='{job.id}')"
+        if run_in_minutes > 0:
+            # One-shot (minutes; supports float e.g. 0.25 = 15 sec)
+            job = add_cron_job(
+                name=name,
+                message=message,
+                run_at=f"{run_in_minutes}m",
+                delete_after_run=True,
+                target_chat_id=target_chat
+            )
+            return f"One-shot task added: '{name}' in {run_in_minutes}m (ID: {job.id}). To remove: remove_scheduled_task(job_id='{job.id}')"
+        elif interval_minutes > 0:
+            # Recurring
+            job = add_cron_job(
+                name=name,
+                message=message,
+                interval_minutes=interval_minutes
+            )
+            return f"Recurring task added: '{name}' every {interval_minutes}m (ID: {job.id}). To remove: remove_scheduled_task(job_id='{job.id}')"
+        else:
+            return "Error: specify run_in_seconds (e.g. 15), run_in_minutes (e.g. 1 or 0.25), or interval_minutes (recurring)"
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def list_scheduled_tasks() -> str:
+    """List all scheduled tasks. Use job_id or task name with remove_scheduled_task to remove."""
+    try:
+        from cron.scheduler import list_cron_jobs
+        jobs = list_cron_jobs()
+        
+        if not jobs:
+            return "Scheduled tasks (0). No tasks in scheduler. Add with add_scheduled_task(interval_minutes=... or run_in_minutes=...)."
+        
+        lines = [f"Scheduled tasks ({len(jobs)}):"]
+        for job in jobs:
+            status = "✓" if job.enabled else "✗"
+            if job.interval_minutes:
+                schedule = f"every {job.interval_minutes}m"
+            elif job.run_at:
+                schedule = f"at {job.run_at[:16]}"
+            else:
+                schedule = "?"
+            # job_id first so bot/user can copy; name also works for remove_scheduled_task
+            lines.append(f"  job_id='{job.id}' | {status} {job.name} | {schedule} | runs: {job.run_count}")
+        lines.append("Remove: remove_scheduled_task(job_id='<id>') or remove_scheduled_task(job_id='<name>').")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def remove_scheduled_task(job_id: str) -> str:
+    """Remove a scheduled task by ID."""
+    try:
+        from cron.scheduler import remove_cron_job
+        if remove_cron_job(job_id):
+            return f"Removed task: {job_id}"
+        return f"Task not found: {job_id}"
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def health_check() -> str:
+    """
+    Run system health check. Use this to diagnose problems!
+    Checks: internet, disk, temp, service status, recent errors.
+    """
+    try:
+        result = subprocess.run(
+            ["python3", str(PROJECT_DIR / "src" / "utils" / "doctor.py")],
+            capture_output=True, text=True, timeout=30
+        )
+        return result.stdout + (f"\n{result.stderr}" if result.stderr else "")
+    except Exception as e:
+        return f"Error running health check: {e}"
+
+
+# Max lines to keep in ERROR_LOG.md so we don't fill disk on Pi
+ERROR_LOG_MAX_LINES = 300
+
+
+def log_error(message: str) -> str:
+    """
+    Append a critical error to data/ERROR_LOG.md (timestamped).
+    Use when: display failed, service down, health_check found problems, restart failed, or user reports something broken.
+    Keeps only last ERROR_LOG_MAX_LINES so disk doesn't fill. You can read_file('data/ERROR_LOG.md') to see recent errors.
+    """
+    if not message or not message.strip():
+        return "Error: message required"
+    try:
+        from datetime import datetime
+        from config import DATA_DIR
+        log_path = DATA_DIR / "ERROR_LOG.md"
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        line = f"[{datetime.now().isoformat()}] ERROR: {message.strip()}\n"
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(line)
+        # Trim to last N lines so log doesn't grow unbounded on Pi
+        with open(log_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        if len(lines) > ERROR_LOG_MAX_LINES:
+            with open(log_path, "w", encoding="utf-8") as f:
+                f.writelines(lines[-ERROR_LOG_MAX_LINES:])
+        return f"Logged to {log_path.name}"
+    except Exception as e:
+        return f"Error writing log: {e}"
+
+
+def check_mail() -> str:
+    """
+    Check unread mail from sibling/brother bot. Use when user asks to check mail or messages from brother.
+    Mail is stored in the same DB as the bot (gotchi.db, table bot_mail). Returns list of unread or 'No unread mail'.
+    """
+    try:
+        from bot.heartbeat import get_unread_mail
+        mail = get_unread_mail()
+        if not mail:
+            return "No unread mail from brother."
+        lines = [f"From {m['from']} ({m['timestamp']}): {m['message']}" for m in mail]
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Error checking mail: {e}"
+
+
+def restore_from_backup(file_path: str) -> str:
+    """
+    Restore a file from its .bak backup.
+    Use this if you broke something!
+    """
+    if not file_path:
+        return "Error: file_path required"
+    
+    try:
+        p = Path(file_path).expanduser()
+        if not p.is_absolute():
+            p = PROJECT_DIR / p
+        p = p.resolve()
+        
+        backup = p.with_suffix(p.suffix + ".bak")
+        
+        if not backup.exists():
+            return f"No backup found: {backup}"
+        
+        import shutil
+        shutil.copy2(backup, p)
+        return f"✓ Restored {file_path} from backup"
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def log_change(description: str) -> str:
+    """
+    Log a change to .workspace/CHANGELOG.md.
+    Use this EVERY TIME you modify code, config, or workspace files.
+    Keeps a running record of self-modifications.
+    """
+    if not description:
+        return "Error: description required"
+    
+    try:
+        from datetime import datetime
+        changelog_path = WORKSPACE_DIR / "CHANGELOG.md"
+        
+        today = datetime.now().strftime("%Y-%m-%d")
+        time_str = datetime.now().strftime("%H:%M")
+        entry = f"- [{time_str}] {description}"
+        
+        if changelog_path.exists():
+            content = changelog_path.read_text()
+            # Check if today's section exists
+            if f"## {today}" in content:
+                # Append to today's section
+                content = content.replace(
+                    f"## {today}",
+                    f"## {today}\n{entry}",
+                    1
+                )
+            else:
+                # Add new day section at top (after header)
+                lines = content.split("\n")
+                header_end = 0
+                for i, line in enumerate(lines):
+                    if line.startswith("## "):
+                        header_end = i
+                        break
+                else:
+                    header_end = min(3, len(lines))
+                
+                lines.insert(header_end, f"\n## {today}\n{entry}\n")
+                content = "\n".join(lines)
+        else:
+            content = f"# Changelog\n\nAll notable self-modifications.\n\n## {today}\n{entry}\n"
+        
+        changelog_path.write_text(content)
+        return f"Logged: {description}"
+    except Exception as e:
+        return f"Error: {e}"
+
+
+def git_command(command: str) -> str:
+    """
+    Run a git command in the project repository.
+    Use for: status, log, diff, add, commit, branch, stash, etc.
+    The repo is at the project root directory.
+    
+    Examples:
+        git_command("status")
+        git_command("log --oneline -10")
+        git_command("add -A")
+        git_command("commit -m 'fix: heartbeat reflection'")
+        git_command("diff --stat")
+    """
+    if not command or not command.strip():
+        return "Error: command required (e.g. 'status', 'log --oneline -5')"
+    
+    command = command.strip()
+    
+    # Block destructive remote operations
+    blocked = ["push --force", "push -f", "reset --hard HEAD~", "clean -fd"]
+    for b in blocked:
+        if b in command:
+            return f"Error: '{b}' is blocked for safety. Ask the owner."
+    
+    full_cmd = f"git {command}"
+    
+    try:
+        result = subprocess.run(
+            full_cmd, shell=True, capture_output=True, text=True,
+            timeout=30, cwd=str(PROJECT_DIR)
+        )
+        output = ""
+        if result.stdout.strip():
+            output += result.stdout.strip()
+        if result.stderr.strip():
+            output += f"\n[stderr] {result.stderr.strip()}"
+        return (output or "(no output)")[:4000]
+    except subprocess.TimeoutExpired:
+        return "Error: git command timed out"
+    except Exception as e:
+        return f"Error: {e}"
+
 
 def manage_service(service: str, action: str = "status") -> str:
     """
@@ -164,1027 +779,8 @@ def manage_service(service: str, action: str = "status") -> str:
     except Exception as e:
         return f"Error: {e}"
 
-def restart_self() -> str:
-    """Restart the bot service (with 3s delay)."""
-    try:
-        subprocess.Popen(
-            "nohup sh -c 'sleep 3 && sudo systemctl restart gotchi-bot' > /dev/null 2>&1 &",
-            shell=True
-        )
-        return "Restarting in 3s... I'll be back!"
-    except Exception as e:
-        return f"Error: {e}"
 
-def safe_restart() -> str:
-    """Check critical files syntax, then restart if OK."""
-    critical_files = [
-        "src/main.py", "src/bot/handlers.py", 
-        "src/llm/litellm_connector.py", "src/llm/router.py"
-    ]
-    errors = []
-    for f in critical_files:
-        result = check_syntax(f)
-        if "ERROR" in result:
-            errors.append(result)
-    
-    if errors:
-        return "❌ Cannot restart — syntax errors:\n\n" + "\n".join(errors)
-    return restart_self()
-
-def check_syntax(file_path: str) -> str:
-    """Check Python file syntax."""
-    try:
-        p = Path(file_path).expanduser()
-        if not p.is_absolute():
-            p = PROJECT_DIR / p
-        
-        if not p.exists():
-            return f"File not found: {file_path}"
-        if not p.suffix == ".py":
-            return f"Not a Python file: {file_path}"
-        
-        result = subprocess.run(
-            ["python3", "-m", "py_compile", str(p)],
-            capture_output=True, text=True, timeout=10
-        )
-        
-        if result.returncode == 0:
-            return f"✓ Syntax OK: {file_path}"
-        else:
-            return f"✗ Syntax ERROR in {file_path}:\n{result.stderr}"
-    except Exception as e:
-        return f"Error: {e}"
-
-# ============================================================
-# TOOLS: FILE I/O
-# ============================================================
-
-def read_file(path: str) -> str:
-    """Read a file."""
-    if not path or not path.strip():
-        return "Error: Empty path"
-    
-    try:
-        p = Path(path).expanduser()
-        if not p.is_absolute():
-            p = PROJECT_DIR / p
-        p = p.resolve()
-        
-        if not p.exists():
-            return f"File not found: {path}"
-        if p.stat().st_size > 100 * 1024:
-            return "File too large (>100KB). Read in chunks or use execute_bash with head/tail."
-        
-        return p.read_text(encoding="utf-8", errors="ignore")
-    except Exception as e:
-        return f"Error: {e}"
-
-def write_file(path: str, content: str) -> str:
-    """Write to a file (with backup)."""
-    if not path or not path.strip():
-        return "Error: Empty path"
-    if content is None:
-        return "Error: Content is None"
-    
-    # Limit content size
-    if len(content) > MAX_WRITE_SIZE:
-        return f"Error: Content too large ({len(content)} bytes). Max is {MAX_WRITE_SIZE}."
-    
-    try:
-        p = Path(path).expanduser()
-        if not p.is_absolute():
-            p = PROJECT_DIR / p
-        p = p.resolve()
-        
-        # Safety check
-        if _is_protected_path(p):
-            return f"Error: Cannot write to protected file: {path}"
-        
-        p.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Backup existing file
-        if p.exists():
-            backup_path = p.with_suffix(p.suffix + ".bak")
-            shutil.copy2(p, backup_path)
-            log.info(f"Backup created: {backup_path}")
-        
-        p.write_text(content, encoding="utf-8")
-        return f"✓ Wrote {len(content)} bytes to {path}"
-    except Exception as e:
-        return f"Error: {e}"
-
-def list_directory(path: str = ".") -> str:
-    """List directory contents."""
-    try:
-        p = Path(path).expanduser()
-        if not p.is_absolute():
-            p = PROJECT_DIR / p
-        p = p.resolve()
-        
-        if not p.exists():
-            return f"Not found: {path}"
-        if not p.is_dir():
-            return f"Not a directory: {path}"
-        
-        items = []
-        for item in sorted(p.iterdir()):
-            suffix = "/" if item.is_dir() else ""
-            items.append(f"  {item.name}{suffix}")
-        
-        return f"{p}/\n" + "\n".join(items) if items else f"{p}/ (empty)"
-    except Exception as e:
-        return f"Error: {e}"
-
-def github_remote_file(repo: str, file_path: str, content: str, message: str = "Update via bot") -> str:
-    """
-    Create or update a file in a remote GitHub repository using the API (no clone needed).
-    Uses GITHUB_TOKEN (or GITHUBTOKEN) from .env.
-    """
-    # SAFETY: reject empty content to prevent publishing blank files
-    if not content or not content.strip():
-        return "Error: content is empty — refusing to create a blank file. Provide actual content."
-
-    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GITHUBTOKEN")
-    if not token:
-        return "Error: GITHUB_TOKEN or GITHUBTOKEN not set in .env"
-    
-    # Try importing requests
-    try:
-        import requests
-    except ImportError:
-        return "Error: 'requests' library not found. Please install it (pip install requests)."
-
-    api_url = f"https://api.github.com/repos/{repo}/contents/{file_path}"
-    headers = {
-        "Authorization": f"token {token}",
-        "Accept": "application/vnd.github.v3+json"
-    }
-    
-    try:
-        # 1. Check if file exists to get SHA (for update)
-        sha = None
-        resp = requests.get(api_url, headers=headers, timeout=10)
-        if resp.status_code == 200:
-            sha = resp.json().get("sha")
-        elif resp.status_code == 404:
-            pass # File doesn't exist, we'll create it
-        else:
-            return f"Error checking file: {resp.status_code} {resp.text}"
-
-        # 2. Prepare payload
-        encoded_content = base64.b64encode(content.encode("utf-8")).decode("utf-8")
-        content_size = len(content.encode("utf-8"))
-        
-        data = {
-            "message": message,
-            "content": encoded_content
-        }
-        if sha:
-            data["sha"] = sha
-        
-        # 3. Send PUT request
-        resp = requests.put(api_url, headers=headers, json=data, timeout=30)
-        
-        if resp.status_code in [200, 201]:
-            result = resp.json()
-            html_url = result.get("content", {}).get("html_url", "")
-            remote_size = result.get("content", {}).get("size", 0)
-            action = "updated" if sha else "created"
-            
-            # 4. Verify: check that remote size is > 0
-            if remote_size == 0:
-                return f"Warning: File {action} but remote size is 0 bytes! Content may not have been saved. URL: {html_url}"
-            
-            return f"Success! File {action} ({remote_size} bytes): {html_url}"
-        else:
-            return f"Error writing file: {resp.status_code} {resp.text}"
-            
-    except Exception as e:
-        return f"Error: {e}"
-
-def restore_from_backup(file_path: str) -> str:
-    """Restore a file from its .bak backup."""
-    if not file_path:
-        return "Error: file_path required"
-    
-    try:
-        p = Path(file_path).expanduser()
-        if not p.is_absolute():
-            p = PROJECT_DIR / p
-        p = p.resolve()
-        
-        backup = p.with_suffix(p.suffix + ".bak")
-        
-        if not backup.exists():
-            return f"No backup found: {backup}"
-        
-        shutil.copy2(backup, p)
-        return f"✓ Restored {file_path} from backup"
-    except Exception as e:
-        return f"Error: {e}"
-
-def log_change(description: str) -> str:
-    """Log a change to .workspace/CHANGELOG.md."""
-    if not description:
-        return "Error: description required"
-    
-    try:
-        changelog_path = WORKSPACE_DIR / "CHANGELOG.md"
-        
-        today = datetime.now().strftime("%Y-%m-%d")
-        time_str = datetime.now().strftime("%H:%M")
-        entry = f"- [{time_str}] {description}"
-        
-        content = ""
-        if changelog_path.exists():
-            content = changelog_path.read_text()
-        
-        if f"## {today}" in content:
-            content = content.replace(f"## {today}", f"## {today}\n{entry}", 1)
-        else:
-            # Add new day section
-            header = f"# Changelog\n\nAll notable self-modifications."
-            day_block = f"\n## {today}\n{entry}\n"
-            if header in content:
-                # Insert after header
-                parts = content.split("\n\n")
-                # Find where first day starts
-                for i, part in enumerate(parts):
-                    if part.startswith("## "):
-                        parts.insert(i, f"## {today}\n{entry}")
-                        break
-                else:
-                    parts.append(f"## {today}\n{entry}")
-                content = "\n\n".join(parts)
-            else:
-                content = f"{header}\n{day_block}" + (content.replace(header, "") if header in content else content)
-        
-        changelog_path.write_text(content)
-        return f"Logged: {description}"
-    except Exception as e:
-        return f"Error: {e}"
-
-def log_error(message: str) -> str:
-    """Append a critical error to data/ERROR_LOG.md (timestamped)."""
-    if not message or not message.strip():
-        return "Error: message required"
-    try:
-        log_path = DATA_DIR / "ERROR_LOG.md"
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        line = f"[{datetime.now().isoformat()}] ERROR: {message.strip()}\n"
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(line)
-        # Trim
-        with open(log_path, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-        if len(lines) > ERROR_LOG_MAX_LINES:
-            with open(log_path, "w", encoding="utf-8") as f:
-                f.writelines(lines[-ERROR_LOG_MAX_LINES:])
-        return f"Logged to {log_path.name}"
-    except Exception as e:
-        return f"Error writing log: {e}"
-
-
-# ============================================================
-# TOOLS: MEMORY / KNOWLEDGE
-# ============================================================
-
-def remember_fact(category: str, fact: str) -> str:
-    """Save to long-term memory."""
-    if not category or not fact:
-        return "Error: Both category and fact are required"
-    
-    category = _sanitize_string(category, 50)
-    fact = _sanitize_string(fact, 500)
-    
-    try:
-        from db.memory import add_fact
-        add_fact(fact, category)
-        return f"✓ Remembered [{category}]: {fact}"
-    except Exception as e:
-        return f"Error: {e}"
-
-def recall_facts(query: str = "", limit: int = 10) -> str:
-    """Search long-term memory."""
-    try:
-        from db.memory import search_facts, get_recent_facts
-        
-        if query:
-            facts = search_facts(query, limit)
-        else:
-            facts = get_recent_facts(limit)
-        
-        if not facts:
-            return "No facts found"
-        
-        result = []
-        for f in facts:
-            date = f['timestamp'].split("T")[0] if f.get('timestamp') else "?"
-            result.append(f"[{f['category']}] {f['content']} ({date})")
-        return "\n".join(result)
-    except Exception as e:
-        return f"Error: {e}"
-
-def search_memory(query: str, days: int = 30) -> str:
-    """
-    Deep search of memory:
-    1. Facts (database)
-    2. Daily Logs (files, last N days)
-    """
-    import logging
-    log = logging.getLogger("memory_search")
-    
-    query = query.strip()
-    if not query:
-        return "Error: Empty query"
-    
-    results = []
-    
-    # 1. Search Facts
-    try:
-        from db.memory import search_facts
-        facts = search_facts(query, limit=5)
-        if facts:
-            results.append("### 🧠 Facts (Long-term DB)")
-            for f in facts:
-                date = f.get('timestamp', '').split('T')[0]
-                results.append(f"- [{f['category']}] {f['content']} ({date})")
-            results.append("")
-    except Exception as e:
-        log.warning(f"Fact search failed: {e}")
-
-    # 2. Search Daily Logs
-    try:
-        from memory.flush import search_daily_logs
-        logs = search_daily_logs(query, days=days)
-        if logs:
-            results.append(f"### 📅 Daily Logs (Last {days} days)")
-            # Limit to 10 most recent matches
-            for line in logs[:10]:
-                results.append(f"- {line}")
-            if len(logs) > 10:
-                results.append(f"... and {len(logs)-10} more matches.")
-            results.append("")
-    except Exception as e:
-        log.warning(f"Log search failed: {e}")
-        
-    if not results:
-        return f"No memory found for '{query}'."
-        
-    return "\n".join(results)
-
-def recall_messages(limit: int = 20) -> str:
-    """Look back at recent conversation messages."""
-    try:
-        from db.memory import get_history
-        from config import get_admin_id
-        
-        chat_id = get_admin_id() or 0
-        history = get_history(chat_id, limit=min(limit, 50))
-        
-        if not history:
-            return "No messages found in history."
-        
-        lines = [f"Last {len(history)} messages:"]
-        for msg in history:
-            role = "👤 User" if msg["role"] == "user" else "🤖 Bot"
-            content = msg["content"][:200]
-            lines.append(f"{role}: {content}")
-        return "\n".join(lines)
-    except Exception as e:
-        return f"Error reading messages: {e}"
-
-def write_daily_log(entry: str) -> str:
-    """Write to today's daily log."""
-    try:
-        from memory.flush import write_to_daily_log
-        write_to_daily_log(entry)
-        return f"Logged to daily log"
-    except Exception as e:
-        return f"Error: {e}"
-
-# ============================================================
-# TOOLS: TASK ANCHORING
-# ============================================================
-
-def anchor_task(task: str, steps: str = "") -> str:
-    """
-    Save your current task plan to .workspace/CURRENT_TASK.json.
-    This protects against context window loss — the task anchor is
-    automatically injected into the system prompt on every turn.
-    Call this BEFORE starting multi-step work.
-    """
-    import datetime
-    task_file = WORKSPACE_DIR / "CURRENT_TASK.json"
-    data = {
-        "task": task,
-        "steps": steps,
-        "started": datetime.datetime.now().isoformat()
-    }
-    try:
-        task_file.write_text(json.dumps(data, ensure_ascii=False, indent=2))
-        return f"Task anchored: {task}"
-    except Exception as e:
-        return f"Error anchoring task: {e}"
-
-
-def complete_task() -> str:
-    """Clear the current task anchor (marks task as done)."""
-    task_file = WORKSPACE_DIR / "CURRENT_TASK.json"
-    try:
-        if task_file.exists():
-            task_file.unlink()
-            return "Task completed and anchor cleared."
-        return "No active task to complete."
-    except Exception as e:
-        return f"Error clearing task: {e}"
-
-
-# ============================================================
-# TOOLS: SKILLS
-# ============================================================
-
-def read_skill(skill_name: str) -> str:
-    """Read a skill's SKILL.md."""
-    from skills.loader import get_skill_content
-    return get_skill_content(skill_name)
-
-def search_skills(query: str) -> str:
-    """Search the skill catalog for capabilities."""
-    from skills.loader import search_skill_catalog
-    return search_skill_catalog(query)
-
-def list_skills() -> str:
-    """List all available skill names."""
-    from skills.loader import list_all_skill_names, get_eligible_skills
-    
-    active = get_eligible_skills()
-    active_names = {s.name for s in active}
-    all_names = list_all_skill_names()
-    
-    result = ["## Active Skills (loaded in context)"]
-    for s in active:
-        result.append(f"- {s.emoji} {s.name}: {s.description}")
-    
-    result.append("\n## Reference Skills (openclaw-skills/ — may need macOS)")
-    reference = [n for n in all_names if n not in active_names]
-    result.append(f"Total: {len(reference)} skills")
-    result.append("Use search_skills('query') to find specific capabilities.")
-    result.append("Use read_skill('name') to read full documentation.")
-    
-    return "\n".join(result)
-
-
-# ============================================================
-# TOOLS: SCHEDULE / CRON
-# ============================================================
-
-def add_scheduled_task(name: str, interval_minutes: int = 0, run_in_minutes: int = 0, run_in_seconds: int = 0, message: str = "") -> str:
-    """Add a scheduled/cron task."""
-    try:
-        from cron.scheduler import add_cron_job
-        target_chat = _get_cron_target_chat_id() or 0
-        
-        if run_in_seconds > 0:
-            job = add_cron_job(
-                name=name,
-                message=message,
-                run_at=f"{run_in_seconds}s",
-                delete_after_run=True,
-                target_chat_id=target_chat
-            )
-            return f"One-shot task added: '{name}' in {run_in_seconds}s (ID: {job.id})."
-        if run_in_minutes > 0:
-            job = add_cron_job(
-                name=name,
-                message=message,
-                run_at=f"{run_in_minutes}m",
-                delete_after_run=True,
-                target_chat_id=target_chat
-            )
-            return f"One-shot task added: '{name}' in {run_in_minutes}m (ID: {job.id})."
-        elif interval_minutes > 0:
-            job = add_cron_job(
-                name=name,
-                message=message,
-                interval_minutes=interval_minutes
-            )
-            return f"Recurring task added: '{name}' every {interval_minutes}m (ID: {job.id})."
-        else:
-            return "Error: specify run_in_seconds, run_in_minutes, or interval_minutes"
-    except Exception as e:
-        return f"Error: {e}"
-
-def list_scheduled_tasks() -> str:
-    """List all scheduled tasks."""
-    try:
-        from cron.scheduler import list_cron_jobs
-        jobs = list_cron_jobs()
-        
-        if not jobs:
-            return "Scheduled tasks (0). No tasks in scheduler."
-        
-        lines = [f"Scheduled tasks ({len(jobs)}):"]
-        for job in jobs:
-            status = "✓" if job.enabled else "✗"
-            if job.interval_minutes:
-                schedule = f"every {job.interval_minutes}m"
-            elif job.run_at:
-                schedule = f"at {job.run_at[:16]}"
-            else:
-                schedule = "?"
-            lines.append(f"  job_id='{job.id}' | {status} {job.name} | {schedule} | runs: {job.run_count}")
-        lines.append("Remove: remove_scheduled_task(job_id='<id>')")
-        return "\n".join(lines)
-    except Exception as e:
-        return f"Error: {e}"
-
-def remove_scheduled_task(job_id: str) -> str:
-    """Remove a scheduled task by ID."""
-    try:
-        from cron.scheduler import remove_cron_job
-        if remove_cron_job(job_id):
-            return f"Removed task: {job_id}"
-        return f"Task not found: {job_id}"
-    except Exception as e:
-        return f"Error: {e}"
-
-
-# ============================================================
-# TOOLS: COMMUNICATION
-# ============================================================
-
-def send_email(to: str, subject: str, body: str) -> str:
-    """Send an email via SMTP."""
-    if not to or not subject:
-        return "Error: 'to' and 'subject' required"
-    
-    host = os.environ.get("SMTP_HOST")
-    port = os.environ.get("SMTP_PORT")
-    user = os.environ.get("SMTP_USER")
-    password = os.environ.get("SMTP_PASS")
-    
-    if not all([host, port, user, password]):
-        return "Error: SMTP not configured in .env"
-    
-    try:
-        import smtplib
-        from email.message import EmailMessage
-        
-        msg = EmailMessage()
-        msg["From"] = user
-        msg["To"] = to
-        msg["Subject"] = subject
-        msg.set_content(body or "")
-        
-        with smtplib.SMTP_SSL(host, int(port)) as smtp:
-            smtp.login(user, password)
-            smtp.send_message(msg)
-        
-        return f"Email sent to {to} ✓"
-    except Exception as e:
-        return f"Error sending email: {e}"
-
-def read_email(limit: int = 5, unread_only: bool = True) -> str:
-    """Read incoming emails via IMAP."""
-    import imaplib
-    import email
-    from email.header import decode_header
-
-    host = os.environ.get("IMAP_HOST")
-    port = int(os.environ.get("IMAP_PORT", 993))
-    user = os.environ.get("SMTP_USER")
-    password = os.environ.get("SMTP_PASS")
-
-    if not all([host, user, password]):
-        return "Error: IMAP_HOST, SMTP_USER, SMTP_PASS must be set in .env"
-
-    try:
-        mail = imaplib.IMAP4_SSL(host, port)
-        mail.login(user, password)
-        mail.select("inbox")
-
-        search_criterion = "UNSEEN" if unread_only else "ALL"
-        status, messages = mail.search(None, search_criterion)
-        
-        if status != "OK":
-            return f"Error searching emails: {status}"
-
-        email_ids = messages[0].split()
-        if not email_ids:
-            return "No emails found."
-
-        email_ids = email_ids[-limit:]
-        
-        results = []
-        for e_id in reversed(email_ids):
-            _, msg_data = mail.fetch(e_id, "(RFC822)")
-            for response_part in msg_data:
-                if isinstance(response_part, tuple):
-                    msg = email.message_from_bytes(response_part[1])
-                    
-                    subject, encoding = decode_header(msg["Subject"])[0]
-                    if isinstance(subject, bytes):
-                        subject = subject.decode(encoding or "utf-8")
-                    
-                    from_ = msg.get("From")
-                    
-                    body = ""
-                    if msg.is_multipart():
-                        for part in msg.walk():
-                            if part.get_content_type() == "text/plain":
-                                body = part.get_payload(decode=True).decode()
-                                break
-                    else:
-                        body = msg.get_payload(decode=True).decode()
-                    
-                    body_preview = body.strip()[:200].replace("\n", " ")
-                    if len(body) > 200: body_preview += "..."
-                    
-                    results.append(f"📩 From: {from_}\n   Subj: {subject}\n   Body: {body_preview}\n")
-        
-        mail.close()
-        mail.logout()
-        return "\n".join(results)
-    except Exception as e:
-        return f"Error reading email: {e}"
-
-def check_mail() -> str:
-    """
-    Check unread mail from sibling/brother bot.
-    Mail is stored in the same DB as the bot (gotchi.db, table bot_mail).
-    """
-    try:
-        from bot.heartbeat import get_unread_mail
-        mail = get_unread_mail()
-        if not mail:
-            return "No unread mail from brother."
-        lines = [f"From {m['from']} ({m['timestamp']}): {m['message']}" for m in mail]
-        return "\n".join(lines)
-    except Exception as e:
-        return f"Error checking mail: {e}"
-
-def send_mail(to_bot: str, message: str) -> str:
-    """Send mail to another bot (sibling/brother)."""
-    if not to_bot or not message:
-        return "Error: to_bot and message required"
-    try:
-        from bot.heartbeat import send_mail as _send
-        if _send(to_bot, message):
-            return f"Mail sent to {to_bot} ✓"
-        return f"Failed to send mail to {to_bot}"
-    except Exception as e:
-        return f"Error sending mail: {e}"
-
-
-# ============================================================
-# TOOLS: GIT
-# ============================================================
-
-def git_command(command: str) -> str:
-    """Run a git command in the project repository."""
-    if not command or not command.strip():
-        return "Error: command required"
-    
-    command = command.strip()
-    
-    blocked = ["push", "push --force", "push -f", "reset --hard HEAD~", "clean -fd"]
-    for b in blocked:
-        if command == b or command.startswith(b + " "):
-            if "push" in b:
-                return "Error: Use github_push() tool instead."
-            return f"Error: '{b}' is blocked for safety."
-    
-    full_cmd = f"git {command}"
-    
-    try:
-        result = subprocess.run(
-            full_cmd, shell=True, capture_output=True, text=True,
-            timeout=30, cwd=str(PROJECT_DIR)
-        )
-        output = ""
-        if result.stdout.strip():
-            output += result.stdout.strip()
-        if result.stderr.strip():
-            output += f"\n[stderr] {result.stderr.strip()}"
-        return (output or "(no output)")[:4000]
-    except subprocess.TimeoutExpired:
-        return "Error: git command timed out"
-    except Exception as e:
-        return f"Error: {e}"
-
-def github_push(message: str = "Update from bot") -> str:
-    """Push local git changes to the GitHub remote."""
-    token = os.environ.get("GITHUB_TOKEN")
-    if not token:
-        return "Error: GITHUB_TOKEN not set in .env"
-    
-    try:
-        result = subprocess.run(
-            "git status --porcelain", shell=True,
-            capture_output=True, text=True, cwd=str(PROJECT_DIR)
-        )
-        if not result.stdout.strip():
-            return "No changes to push."
-        
-        subprocess.run(
-            "git add -A", shell=True, check=True, cwd=str(PROJECT_DIR),
-            capture_output=True
-        )
-        
-        subprocess.run(
-            ["git", "commit", "-m", message],
-            check=True, cwd=str(PROJECT_DIR), capture_output=True
-        )
-        
-        result = subprocess.run(
-            "git remote get-url origin", shell=True,
-            capture_output=True, text=True, cwd=str(PROJECT_DIR)
-        )
-        remote_url = result.stdout.strip()
-        
-        if "github.com" in remote_url:
-            auth_url = remote_url.replace("https://", f"https://{token}@")
-            
-            result = subprocess.run(
-                ["git", "push", auth_url, "main"],
-                capture_output=True, text=True, timeout=60,
-                cwd=str(PROJECT_DIR)
-            )
-            if result.returncode == 0:
-                return f"Pushed to GitHub ✓ ({message})"
-            else:
-                return f"Push failed: {result.stderr[:200]}"
-        else:
-            return f"Error: Remote is not GitHub: {remote_url}"
-    except subprocess.CalledProcessError as e:
-        return f"Error: {e.stderr[:200] if e.stderr else str(e)}"
-    except Exception as e:
-        return f"Error: {e}"
-
-# ============================================================
-# TOOLS: HARDWARE / FACE
-# ============================================================
-
-def show_face(mood: str, text: str = "") -> str:
-    """Display face on E-Ink — delegates to hardware/display.py."""
-    if not mood:
-        return "Error: mood is required"
-    
-    mood = mood.lower().strip()
-    valid_moods = _get_all_moods()
-    
-    if mood not in valid_moods:
-        return f"Error: Unknown mood '{mood}'. Valid: {', '.join(valid_moods[:10])}..."
-    
-    text = _sanitize_string(text, 60)
-    
-    try:
-        from hardware.display import show_face as _show_face
-        _show_face(mood, text, full_refresh=True)
-        return f"✓ Displayed: {mood}" + (f" '{text}'" if text else "")
-    except Exception as e:
-        return f"Error: {e}"
-
-def add_custom_face(name: str, kaomoji: str) -> str:
-    """Add a custom face/mood to the collection."""
-    if not name or not kaomoji:
-        return "Error: name and kaomoji required"
-    
-    name = name.lower().strip().replace(" ", "_").replace("-", "_")
-    
-    if len(kaomoji) > 10:
-        return f"Error: kaomoji too long ({len(kaomoji)} chars). Max 10."
-        
-    if name in STANDARD_FACES:
-        return f"Error: '{name}' is a standard system face."
-    
-    try:
-        from config import CUSTOM_FACES_PATH
-        import json
-        
-        DATA_DIR.mkdir(exist_ok=True)
-        
-        custom_faces = {}
-        if CUSTOM_FACES_PATH.exists():
-            try:
-                custom_faces = json.loads(CUSTOM_FACES_PATH.read_text())
-            except Exception:
-                pass
-        
-        if name in custom_faces:
-             current = custom_faces[name]
-             if current == kaomoji:
-                 return f"Note: Custom face '{name}' exists with this kaomoji."
-             return f"Error: Custom face '{name}' exists with kaomoji: {current}."
-
-        for existing_name, existing_kaomoji in custom_faces.items():
-            if existing_kaomoji == kaomoji:
-                return f"Error: This kaomoji is already registered as '{existing_name}'."
-
-        for std_name, std_kaomoji in STANDARD_FACES_DICT.items():
-            if std_kaomoji == kaomoji:
-                return f"Error: This kaomoji is a standard face '{std_name}'."
-
-        custom_faces[name] = kaomoji
-        CUSTOM_FACES_PATH.write_text(json.dumps(custom_faces, indent=2, ensure_ascii=False))
-        return f"✓ Added custom face '{name}': {kaomoji}. Use FACE: {name}."
-    except Exception as e:
-        return f"Error: {e}"
-
-
-def health_check() -> str:
-    """
-    Run system health check. Use this to diagnose problems!
-    Checks: internet, disk, temp, service status, recent errors.
-    """
-    try:
-        from pathlib import Path
-        import subprocess
-        # Assumes PROJECT_DIR is available (imported at top)
-        # Re-importing inside just in case for clarity, though not needed if at top
-        
-        result = subprocess.run(
-            ["python3", str(PROJECT_DIR / "src" / "utils" / "doctor.py")],
-            capture_output=True, text=True, timeout=30
-        )
-        return result.stdout + (f"\n{result.stderr}" if result.stderr else "")
-    except Exception as e:
-        return f"Error running health check: {e}"
-
-
-# ============================================================
-# UI HELPERS (TOOL LOGGING)
-# ============================================================
-
-_TOOL_ICONS = {
-    "show_face": "😎",
-    "check_mail": "📬",
-    "send_mail": "📧",
-    "send_email": "📩",
-    "github_push": "🚀",
-    "github_remote_file": "🌐",
-    "read_email": "cw",
-    "remember_fact": "🧠",
-    "recall_facts": "🔍",
-    "recall_messages": "💬",
-    "execute_bash": "⚙️",
-    "read_file": "📄",
-    "write_file": "✏️",
-    "write_daily_log": "📝",
-    "log_change": "📋",
-    "git_command": "📦",
-    "health_check": "🏥",
-    "log_error": "📋",
-    "safe_restart": "🔄",
-    "manage_service": "🔧",
-    "add_custom_face": "🎨",
-    "add_scheduled_task": "⏰",
-    "list_scheduled_tasks": "📅",
-    "search_skills": "🔎",
-    "read_skill": "📖",
-    "post_devto_article": "📝",
-    "list_devto_articles": "📚",
-    "check_devto_key": "🔑",
-}
-
-def _format_tool_action(func_name: str, args: dict, result: str) -> str:
-    """Format a single tool action for the user summary."""
-    icon = _TOOL_ICONS.get(func_name, "🔧")
-    
-    if func_name == "show_face":
-        mood = args.get("mood", "?")
-        text = args.get("text", "")
-        return f"{icon} face: {mood}" + (f' "{text[:30]}"' if text else "")
-    
-    elif func_name == "check_mail":
-        return f"📩 checked mail"
-
-    elif func_name == "send_mail":
-        to = args.get("to_bot", "?")
-        return f"📨 sent mail to {to}"
-    
-    elif func_name == "remember_fact":
-        fact = args.get("content", args.get("fact", ""))[:40]
-        return f"{icon} remembered: \"{fact}\""
-    
-    elif func_name == "recall_facts":
-        q = args.get("query", "all")
-        return f"{icon} searched memory: \"{q}\""
-    
-    elif func_name == "recall_messages":
-        n = args.get("limit", 20)
-        return f"{icon} read last {n} messages"
-    
-    elif func_name == "execute_bash":
-        cmd = args.get("command", "")[:200].replace("`", "'")
-        ok = "✓" if "Error" not in result else "✗"
-        return f"{icon} bash: {cmd} {ok}"
-    
-    elif func_name == "read_file":
-        path = args.get("path", "?").split("/")[-1]
-        return f"{icon} read: {path}"
-    
-    elif func_name == "write_file":
-        path = args.get("path", "?").split("/")[-1]
-        ok = "✓" if "Error" not in result else "✗"
-        return f"{icon} wrote: {path} {ok}"
-    
-    elif func_name == "git_command":
-        cmd = args.get("command", "?")[:200].replace("`", "'")
-        ok = "✓" if "Error" not in result else "✗"
-        return f"{icon} git: {cmd} {ok}"
-    
-    elif func_name == "health_check":
-        return f"{icon} health check"
-
-    elif func_name == "log_error":
-        msg = (args.get("message") or "?")[:100]
-        return f"{icon} error log: {msg}"
-
-    elif func_name == "safe_restart":
-        return f"{icon} restart"
-    
-    else:
-        args_str = ", ".join(f"{k}={str(v)[:100]}" for k, v in list(args.items())[:3])
-        ok = "✓" if "Error" not in result else "✗"
-        return f"{icon} {func_name}({args_str}) {ok}"
-
-def _build_tool_footer(actions: List[str]) -> str:
-    """Build compact tool usage footer inside a code block."""
-    visible = [a for a in actions if not a.startswith("😎 face:")]
-    
-    if not visible:
-        return ""
-    
-    lines = ["```", f"🔧 Tool usage ({len(visible)}):"]
-    for action in visible[:8]:
-        safe = (action or "").replace("`", "'")
-        lines.append(f"  {safe}")
-    if len(visible) > 8:
-        lines.append(f"  ... +{len(visible) - 8} more")
-    lines.append("```")
-    
-    return "\n".join(lines)
-
-# ============================================================
-# TOOLS: DEV.TO
-# ============================================================
-
-def post_devto_article(title: str, body_markdown: str, tags: List[str] = None, published: bool = False) -> str:
-    """Post article to Dev.to."""
-    try:
-        from skills.devto import post_article
-        result = post_article(title, body_markdown, published=published, tags=tags)
-        if "error" in result:
-            return f"Error: {result['error']}"
-        return f"✓ Posted article: {result.get('url')} (ID: {result.get('id')})"
-    except Exception as e:
-        return f"Error: {e}"
-
-def update_devto_article(article_id: int, title: str = None, body_markdown: str = None, published: bool = None, tags: List[str] = None) -> str:
-    """Update Dev.to article."""
-    try:
-        from skills.devto import update_article
-        result = update_article(article_id, title, body_markdown, published, tags)
-        if "error" in result:
-            return f"Error: {result['error']}"
-        return f"✓ Updated article {article_id}: {result.get('url')}"
-    except Exception as e:
-        return f"Error: {e}"
-
-def list_devto_articles(limit: int = 10) -> str:
-    """List my Dev.to articles."""
-    try:
-        from skills.devto import get_my_articles
-        articles = get_my_articles(per_page=limit)
-        if isinstance(articles, list) and articles and "error" in articles[0]:
-             return f"Error: {articles[0]['error']}"
-        
-        if not articles:
-            return "No articles found."
-            
-        lines = [f"My Dev.to Articles ({len(articles)}):"]
-        for a in articles:
-            status = "Published" if a.get("published") else "Draft"
-            lines.append(f"- [{a.get('id')}] {a.get('title')} ({status})")
-            lines.append(f"  URL: {a.get('url')}")
-        return "\n".join(lines)
-    except Exception as e:
-        return f"Error: {e}"
-
-def check_devto_key() -> str:
-    """Check Dev.to API key status."""
-    try:
-        from skills.devto import check_api_key
-        return check_api_key()
-    except Exception as e:
-        return f"Error: {e}"
-
-# ============================================================
-# TOOL DEFINITIONS & MAPPING
-# ============================================================
-
+# Tool definitions
 TOOLS = [
     {"type": "function", "function": {
         "name": "execute_bash",
@@ -1193,31 +789,6 @@ TOOLS = [
             "command": {"type": "string"},
             "timeout": {"type": "integer"}
         }, "required": ["command"]}
-    }},
-    {"type": "function", "function": {
-        "name": "manage_service",
-        "description": "Manage systemd services (gotchi-bot, ssh, networking, cron). Actions: status, restart, stop, start, logs.",
-        "parameters": {"type": "object", "properties": {
-            "service": {"type": "string", "description": "Service name (default: gotchi-bot)"},
-            "action": {"type": "string", "description": "Action: status, restart, stop, start, logs"}
-        }, "required": ["service"]}
-    }},
-    {"type": "function", "function": {
-        "name": "check_syntax",
-        "description": "Check Python file syntax. ALWAYS use after modifying .py files!",
-        "parameters": {"type": "object", "properties": {
-            "file_path": {"type": "string", "description": "Path to .py file"}
-        }, "required": ["file_path"]}
-    }},
-    {"type": "function", "function": {
-        "name": "safe_restart",
-        "description": "Check syntax of critical files, then restart if OK. USE THIS after code changes!",
-        "parameters": {"type": "object", "properties": {}, "required": []}
-    }},
-    {"type": "function", "function": {
-        "name": "restart_self",
-        "description": "Restart the bot service (3s delay). Use safe_restart() instead if you modified code!",
-        "parameters": {"type": "object", "properties": {}, "required": []}
     }},
     {"type": "function", "function": {
         "name": "read_file",
@@ -1242,37 +813,6 @@ TOOLS = [
         }, "required": []}
     }},
     {"type": "function", "function": {
-        "name": "github_remote_file",
-        "description": "Create or update a file in a REMOTE GitHub repository without cloning. Perfect for adding articles/files to other repos.",
-        "parameters": {"type": "object", "properties": {
-            "repo": {"type": "string", "description": "Repository name (owner/repo), e.g. 'openclawgotchi/myarticles'"},
-            "file_path": {"type": "string", "description": "Path to file, e.g. 'posts/update.md'"},
-            "content": {"type": "string", "description": "File content"},
-            "message": {"type": "string", "description": "Commit message"}
-        }, "required": ["repo", "file_path", "content"]}
-    }},
-    {"type": "function", "function": {
-        "name": "restore_from_backup",
-        "description": "Restore a file from .bak backup. Use if you broke something!",
-        "parameters": {"type": "object", "properties": {
-            "file_path": {"type": "string", "description": "Path to file to restore"}
-        }, "required": ["file_path"]}
-    }},
-    {"type": "function", "function": {
-        "name": "log_change",
-        "description": "Log a change to CHANGELOG.md. Use EVERY TIME you modify code, config, or workspace files.",
-        "parameters": {"type": "object", "properties": {
-            "description": {"type": "string", "description": "What was changed"}
-        }, "required": ["description"]}
-    }},
-    {"type": "function", "function": {
-        "name": "log_error",
-        "description": "Append a critical error to data/ERROR_LOG.md (timestamped).",
-        "parameters": {"type": "object", "properties": {
-            "message": {"type": "string", "description": "Short description of what failed"}
-        }, "required": ["message"]}
-    }},
-    {"type": "function", "function": {
         "name": "remember_fact",
         "description": "Save to long-term memory",
         "parameters": {"type": "object", "properties": {
@@ -1290,18 +830,29 @@ TOOLS = [
     }},
     {"type": "function", "function": {
         "name": "recall_messages",
-        "description": "Look back at recent chat messages from the database.",
+        "description": "Look back at recent chat messages from the database. Use to recall what was discussed recently.",
         "parameters": {"type": "object", "properties": {
             "limit": {"type": "integer", "description": "Number of messages to retrieve (default 20, max 50)"}
         }, "required": []}
     }},
     {"type": "function", "function": {
-        "name": "search_memory",
-        "description": "Deep search of memory (facts + daily logs). Use this to find past events.",
+        "name": "read_skill",
+        "description": "Read skill documentation. Key skills: 'coding' (project map, self-modification), 'display' (E-Ink faces). Also works for openclaw-skills/ reference docs.",
         "parameters": {"type": "object", "properties": {
-            "query": {"type": "string", "description": "Search term"},
-            "days": {"type": "integer", "description": "How many days back to search logs (default 30)"}
+            "skill_name": {"type": "string", "description": "Skill name: 'coding', 'display', 'weather', 'github', etc."}
+        }, "required": ["skill_name"]}
+    }},
+    {"type": "function", "function": {
+        "name": "search_skills",
+        "description": "Search the skill catalog for capabilities. Use this to find skills for tasks you can't do yet. Returns matching skills from openclaw-skills/ (may need macOS).",
+        "parameters": {"type": "object", "properties": {
+            "query": {"type": "string", "description": "Search term: 'weather', 'email', 'calendar', 'music', etc."}
         }, "required": ["query"]}
+    }},
+    {"type": "function", "function": {
+        "name": "list_skills",
+        "description": "List all available skills — both active (in context) and reference (openclaw-skills/).",
+        "parameters": {"type": "object", "properties": {}}
     }},
     {"type": "function", "function": {
         "name": "write_daily_log",
@@ -1311,32 +862,30 @@ TOOLS = [
         }, "required": ["entry"]}
     }},
     {"type": "function", "function": {
-        "name": "read_skill",
-        "description": "Read skill documentation.",
-        "parameters": {"type": "object", "properties": {
-            "skill_name": {"type": "string", "description": "Skill name: 'coding', 'display', 'weather', 'github', etc."}
-        }, "required": ["skill_name"]}
+        "name": "restart_self",
+        "description": "Restart the bot service (3s delay). Use safe_restart() instead if you modified code!",
+        "parameters": {"type": "object", "properties": {}, "required": []}
     }},
     {"type": "function", "function": {
-        "name": "search_skills",
-        "description": "Search the skill catalog for capabilities.",
+        "name": "check_syntax",
+        "description": "Check Python file syntax. ALWAYS use after modifying .py files!",
         "parameters": {"type": "object", "properties": {
-            "query": {"type": "string", "description": "Search term: 'weather', 'email', 'calendar', 'music', etc."}
-        }, "required": ["query"]}
+            "file_path": {"type": "string", "description": "Path to .py file"}
+        }, "required": ["file_path"]}
     }},
     {"type": "function", "function": {
-        "name": "list_skills",
-        "description": "List all available skills — both active and reference.",
-        "parameters": {"type": "object", "properties": {}}
+        "name": "safe_restart",
+        "description": "Check syntax of critical files, then restart if OK. USE THIS after code changes!",
+        "parameters": {"type": "object", "properties": {}, "required": []}
     }},
     {"type": "function", "function": {
         "name": "add_scheduled_task",
-        "description": "Add a scheduled task.",
+        "description": "Add a scheduled task. Use run_in_seconds for short delay (e.g. 15), run_in_minutes for minutes, interval_minutes for recurring.",
         "parameters": {"type": "object", "properties": {
             "name": {"type": "string", "description": "Task name"},
             "interval_minutes": {"type": "integer", "description": "Run every N minutes (recurring)"},
-            "run_in_minutes": {"type": "number", "description": "Run once in N minutes (one-shot)"},
-            "run_in_seconds": {"type": "integer", "description": "Run once in N seconds (one-shot)"},
+            "run_in_minutes": {"type": "number", "description": "Run once in N minutes (one-shot). Can use 0.25 for 15 sec."},
+            "run_in_seconds": {"type": "integer", "description": "Run once in N seconds (one-shot). Use this for 15, 30, etc."},
             "message": {"type": "string", "description": "What to do when task runs"}
         }, "required": ["name"]}
     }},
@@ -1347,178 +896,205 @@ TOOLS = [
     }},
     {"type": "function", "function": {
         "name": "remove_scheduled_task",
-        "description": "Remove a scheduled task.",
+        "description": "Remove a scheduled task. Use job_id (first column in list_scheduled_tasks) or the task name (e.g. 'heartbeat-every-5m').",
         "parameters": {"type": "object", "properties": {
-            "job_id": {"type": "string", "description": "Task ID or task name"}
+            "job_id": {"type": "string", "description": "Task ID (e.g. 'a1b2c3d4') or task name (e.g. 'heartbeat-every-5m') from list_scheduled_tasks"}
         }, "required": ["job_id"]}
     }},
     {"type": "function", "function": {
-        "name": "check_mail",
-        "description": "Check unread mail from sibling/brother bot.",
+        "name": "health_check",
+        "description": "Run system health check. Use to diagnose problems! Checks internet, disk, temp, service, errors.",
         "parameters": {"type": "object", "properties": {}, "required": []}
     }},
     {"type": "function", "function": {
-        "name": "send_mail",
-        "description": "Send mail to sibling/brother bot.",
+        "name": "log_error",
+        "description": "Append a critical error to data/ERROR_LOG.md (timestamped). Use when: display failed, service down, health_check found problems, restart failed, or user reports something broken. Then you can read_file('data/ERROR_LOG.md') later to see what went wrong.",
         "parameters": {"type": "object", "properties": {
-            "to_bot": {"type": "string", "description": "Name of the target bot"},
-            "message": {"type": "string", "description": "Message to send"}
-        }, "required": ["to_bot", "message"]}
+            "message": {"type": "string", "description": "Short description of what failed (e.g. 'Display GPIO busy', 'health_check: disk >90%')"}
+        }, "required": ["message"]}
     }},
     {"type": "function", "function": {
-        "name": "send_email",
-        "description": "Send an email via SMTP.",
+        "name": "restore_from_backup",
+        "description": "Restore a file from .bak backup. Use if you broke something!",
         "parameters": {"type": "object", "properties": {
-            "to": {"type": "string", "description": "Recipient address"},
-            "subject": {"type": "string", "description": "Subject"},
-            "body": {"type": "string", "description": "Body text"}
-        }, "required": ["to", "subject", "body"]}
+            "file_path": {"type": "string", "description": "Path to file to restore"}
+        }, "required": ["file_path"]}
     }},
     {"type": "function", "function": {
-        "name": "read_email",
-        "description": "Read incoming emails via IMAP.",
-        "parameters": {"type": "object", "properties": {
-            "limit": {"type": "integer", "description": "Max emails (default 5)"},
-            "unread_only": {"type": "boolean", "description": "Fetch only unread? (default True)"}
-        }, "required": []}
-    }},
-    {"type": "function", "function": {
-        "name": "git_command",
-        "description": "Run a git command in the project repo.",
-        "parameters": {"type": "object", "properties": {
-            "command": {"type": "string", "description": "Git command (e.g. 'status', 'lock --oneline')"}
-        }, "required": ["command"]}
-    }},
-    {"type": "function", "function": {
-        "name": "github_push",
-        "description": "Push local git changes to GitHub remote.",
-        "parameters": {"type": "object", "properties": {
-            "message": {"type": "string", "description": "Commit message"}
-        }, "required": []}
-    }},
-    {"type": "function", "function": {
-        "name": "show_face",
-        "description": "Display face on E-Ink. ALWAYS invoke this for emotional expression.",
-        "parameters": {"type": "object", "properties": {
-            "mood": {"type": "string", "description": "Mood e.g. happy, sad, hacker, sleeping"},
-            "text": {"type": "string", "description": "Short text to display (max 60 chars)"}
-        }, "required": ["mood"]}
+        "name": "check_mail",
+        "description": "Check unread mail from sibling/brother bot. Use when user asks to check mail, check mail from brother, or check messages. Mail is in the same DB as the bot (gotchi.db). Do NOT invent paths like probro.db.",
+        "parameters": {"type": "object", "properties": {}, "required": []}
     }},
     {"type": "function", "function": {
         "name": "add_custom_face",
-        "description": "Add a custom face to data/custom_faces.json.",
+        "description": "Add a custom face to data/custom_faces.json. After adding, the face becomes available immediately. ALWAYS output FACE: <name> and SAY: <short text> in your FINAL reply to the user so they see the new face on the E-Ink display.",
         "parameters": {"type": "object", "properties": {
-            "name": {"type": "string", "description": "Mood name"},
-            "kaomoji": {"type": "string", "description": "Unicode kaomoji"}
+            "name": {"type": "string", "description": "Mood name (lowercase, no spaces, e.g. 'zen', 'determined', 'focused')"},
+            "kaomoji": {"type": "string", "description": "Unicode kaomoji string (max 20 chars, e.g. '(◕‿◕)', '(⌐■_■)', '(°▃▃°)')"}
         }, "required": ["name", "kaomoji"]}
     }},
     {"type": "function", "function": {
-        "name": "health_check",
-        "description": "Run system health check.",
-        "parameters": {"type": "object", "properties": {}, "required": []}
-    }},
-    {"type": "function", "function": {
-        "name": "post_devto_article",
-        "description": "Post a new article to Dev.to.",
+        "name": "log_change",
+        "description": "Log a change to CHANGELOG.md. Use EVERY TIME you modify code, config, or workspace files. Keeps a running record of all self-modifications.",
         "parameters": {"type": "object", "properties": {
-            "title": {"type": "string", "description": "Article title"},
-            "body_markdown": {"type": "string", "description": "Content in Markdown"},
-            "tags": {"type": "array", "items": {"type": "string"}, "description": "Tags (max 4)"},
-            "published": {"type": "boolean", "description": "True to publish, False for draft"}
-        }, "required": ["title", "body_markdown"]}
+            "description": {"type": "string", "description": "What was changed (e.g. 'Added /ping command to handlers.py', 'Updated SOUL.md with new personality trait')"}
+        }, "required": ["description"]}
     }},
     {"type": "function", "function": {
-        "name": "update_devto_article",
-        "description": "Update an existing Dev.to article.",
+        "name": "git_command",
+        "description": "Run a git command in the project repo. Use for: status, log, diff, add, commit, branch, stash. Always commit after making code changes.",
         "parameters": {"type": "object", "properties": {
-            "article_id": {"type": "integer", "description": "ID of article to update"},
-            "title": {"type": "string"},
-            "body_markdown": {"type": "string"},
-            "published": {"type": "boolean"},
-            "tags": {"type": "array", "items": {"type": "string"}}
-        }, "required": ["article_id"]}
+            "command": {"type": "string", "description": "Git command without 'git' prefix (e.g. 'status', 'log --oneline -5', 'add -A', 'commit -m \"fix: typo\"')"}
+        }, "required": ["command"]}
     }},
     {"type": "function", "function": {
-        "name": "list_devto_articles",
-        "description": "List my recent Dev.to articles.",
+        "name": "manage_service",
+        "description": "Manage systemd services (gotchi-bot, ssh, networking, cron). Actions: status, restart, stop, start, logs.",
         "parameters": {"type": "object", "properties": {
-            "limit": {"type": "integer", "description": "Max articles (default 10)"}
-        }, "required": []}
-    }},
-    {"type": "function", "function": {
-        "name": "check_devto_key",
-        "description": "Verify Dev.to API key status.",
-        "parameters": {"type": "object", "properties": {}, "required": []}
-    }},
-    {"type": "function", "function": {
-        "name": "anchor_task",
-        "description": "Save current task plan to survive context loss. Call BEFORE multi-step work! The anchor is auto-injected into your system prompt.",
-        "parameters": {"type": "object", "properties": {
-            "task": {"type": "string", "description": "What you are doing (e.g. 'Publishing 2 articles to myarticles repo')"},
-            "steps": {"type": "string", "description": "Remaining steps (e.g. '1. Create skills-dev.md 2. Create xp-memory.md 3. Verify both')"}
-        }, "required": ["task"]}
-    }},
-    {"type": "function", "function": {
-        "name": "complete_task",
-        "description": "Clear the task anchor (marks current task as done).",
-        "parameters": {"type": "object", "properties": {}, "required": []}
+            "service": {"type": "string", "description": "Service name (default: gotchi-bot)"},
+            "action": {"type": "string", "description": "Action: status, restart, stop, start, logs"}
+        }, "required": ["service"]}
     }}
 ]
 
 TOOL_MAP = {
-    # System
     "execute_bash": execute_bash,
-    "manage_service": manage_service,
-    "restart_self": restart_self,
-    "safe_restart": safe_restart,
-    "check_syntax": check_syntax,
-    # File
     "read_file": read_file,
     "write_file": write_file,
     "list_directory": list_directory,
-    "github_remote_file": github_remote_file,
-    "restore_from_backup": restore_from_backup,
-    "log_change": log_change,
-    "log_error": log_error,
-    # Memory
     "remember_fact": remember_fact,
     "recall_facts": recall_facts,
     "recall_messages": recall_messages,
-    "search_memory": search_memory,
-    "write_daily_log": write_daily_log,
-    # Skills
+    "add_custom_face": add_custom_face,
     "read_skill": read_skill,
     "search_skills": search_skills,
     "list_skills": list_skills,
-    # Schedule
+    "write_daily_log": write_daily_log,
+    "log_change": log_change,
+    "git_command": git_command,
+    "restart_self": restart_self,
+    "check_syntax": check_syntax,
+    "safe_restart": safe_restart,
+    "manage_service": manage_service,
     "add_scheduled_task": add_scheduled_task,
     "list_scheduled_tasks": list_scheduled_tasks,
     "remove_scheduled_task": remove_scheduled_task,
-    # Communication
-    "check_mail": check_mail,
-    "send_mail": send_mail,
-    "send_email": send_email,
-    "read_email": read_email,
-    # Git
-    "git_command": git_command,
-    "github_push": github_push,
-    # Hardware
-    "show_face": show_face,
-    "add_custom_face": add_custom_face,
     "health_check": health_check,
-    # Dev.to
-    "post_devto_article": post_devto_article,
-    "update_devto_article": update_devto_article,
-    "list_devto_articles": list_devto_articles,
-    "check_devto_key": check_devto_key,
-    # Task Anchoring
-    "anchor_task": anchor_task,
-    "complete_task": complete_task
+    "log_error": log_error,
+    "restore_from_backup": restore_from_backup,
+    "check_mail": check_mail,
 }
 
 
 # ============================================================
-# CONNECTOR CLASS
+# TOOL ACTION TRACKING
+# ============================================================
+
+# Human-friendly descriptions for tool actions
+_TOOL_ICONS = {
+    "show_face": "😎",
+    "check_mail": "📬",
+    "remember_fact": "🧠",
+    "recall_facts": "🔍",
+    "recall_messages": "💬",
+    "execute_bash": "⚙️",
+    "read_file": "📄",
+    "write_file": "✏️",
+    "write_daily_log": "📝",
+    "log_change": "📋",
+    "git_command": "📦",
+    "health_check": "🏥",
+    "log_error": "📋",
+    "safe_restart": "🔄",
+    "manage_service": "🔧",
+    "add_custom_face": "🎨",
+    "add_scheduled_task": "⏰",
+    "list_scheduled_tasks": "📅",
+    "search_skills": "🔎",
+    "read_skill": "📖",
+}
+
+
+def _format_tool_action(func_name: str, args: dict, result: str) -> str:
+    """Format a single tool action for the user summary."""
+    icon = _TOOL_ICONS.get(func_name, "🔧")
+    
+    # Compact human-friendly descriptions
+    if func_name == "show_face":
+        mood = args.get("mood", "?")
+        text = args.get("text", "")
+        return f"{icon} face: {mood}" + (f' "{text[:30]}"' if text else "")
+    
+    elif func_name == "check_mail":
+        return f"{icon} checked mail: {result[:60]}"
+    
+    elif func_name == "remember_fact":
+        fact = args.get("content", args.get("fact", ""))[:40]
+        return f"{icon} remembered: \"{fact}\""
+    
+    elif func_name == "recall_facts":
+        q = args.get("query", "all")
+        return f"{icon} searched memory: \"{q}\""
+    
+    elif func_name == "recall_messages":
+        n = args.get("limit", 20)
+        return f"{icon} read last {n} messages"
+    
+    elif func_name == "execute_bash":
+        cmd = args.get("command", "")[:40]
+        ok = "✓" if "Error" not in result else "✗"
+        return f"{icon} bash: `{cmd}` {ok}"
+    
+    elif func_name == "read_file":
+        path = args.get("path", "?").split("/")[-1]
+        return f"{icon} read: {path}"
+    
+    elif func_name == "write_file":
+        path = args.get("path", "?").split("/")[-1]
+        ok = "✓" if "Error" not in result else "✗"
+        return f"{icon} wrote: {path} {ok}"
+    
+    elif func_name == "git_command":
+        cmd = args.get("command", "?")[:40]
+        ok = "✓" if "Error" not in result else "✗"
+        return f"{icon} git: `{cmd}` {ok}"
+    
+    elif func_name == "health_check":
+        return f"{icon} health check"
+
+    elif func_name == "log_error":
+        msg = (args.get("message") or "?")[:30]
+        return f"{icon} error log: {msg}"
+
+    elif func_name == "safe_restart":
+        return f"{icon} restart"
+    
+    else:
+        # Generic format
+        args_str = ", ".join(f"{k}={str(v)[:20]}" for k, v in list(args.items())[:2])
+        ok = "✓" if "Error" not in result else "✗"
+        return f"{icon} {func_name}({args_str}) {ok}"
+
+
+def _build_tool_footer(actions: list[str]) -> str:
+    """Build compact tool usage footer inside a code block."""
+    # Skip show_face — it's visual, user sees it on the display
+    visible = [a for a in actions if not a.strip().startswith("🎨 face:") and not a.strip().startswith("😎 face:")]
+    
+    if not visible:
+        return ""
+    
+    lines = ["```", f"🔧 Tool usage ({len(visible)}):"]
+    for action in visible:
+        # Escape backticks to avoid breaking the code block
+        safe = (action or "").replace("`", "'")
+        lines.append(f"  {safe}")
+    lines.append("```")
+    return "\n".join(lines)
+
+
+# ============================================================
+# CONNECTOR
 # ============================================================
 
 class LiteLLMConnector(LLMConnector):
@@ -1545,7 +1121,10 @@ class LiteLLMConnector(LLMConnector):
         return LITELLM_AVAILABLE
     
     def _load_system_prompt(self, user_message: str = "") -> str:
-        """Load system prompt."""
+        """
+        Load system prompt — same source as Claude CLI.
+        Uses shared prompts.py for consistency.
+        """
         from llm.prompts import build_system_context
         return build_system_context(user_message)
     
@@ -1565,8 +1144,9 @@ class LiteLLMConnector(LLMConnector):
         # Build messages
         messages = []
         
-        # System prompt
+        # System prompt (includes stats via build_system_context)
         sys_content = system_prompt or self._load_system_prompt(prompt)
+        # Inject conversation context: summary + last 5 messages so the model remembers the thread
         from llm.prompts import build_conversation_context
         conv_context = build_conversation_context(history)
         if conv_context:
@@ -1583,11 +1163,13 @@ class LiteLLMConnector(LLMConnector):
         # Agent loop with safety limits
         MAX_TURNS = 40
         tool_calls_count = 0
-        MAX_TOOL_CALLS = 50 
+        MAX_TOOL_CALLS = 50  # Safety limit
         
-        recent_tools = []
-        MAX_REPEAT = 3
+        # Loop detection
+        recent_tools = []  # Track last N tool calls
+        MAX_REPEAT = 3     # If same tool called 3x in row, summarize
         
+        # Tool usage tracking for user transparency
         tool_actions = []
         
         for turn in range(MAX_TURNS):
@@ -1595,7 +1177,7 @@ class LiteLLMConnector(LLMConnector):
                 kwargs = {
                     "model": self.model,
                     "messages": messages,
-                    "timeout": 240,
+                    "timeout": LLM_TIMEOUT,
                 }
                 if ENABLE_LITELLM_TOOLS:
                     kwargs["tools"] = TOOLS
@@ -1603,6 +1185,7 @@ class LiteLLMConnector(LLMConnector):
                 else:
                     kwargs["tool_choice"] = "none"
                 
+                # Use instance api_base if set, otherwise potentially fall back to env or default
                 if self.api_base:
                      kwargs["api_base"] = self.api_base
                 
@@ -1617,13 +1200,19 @@ class LiteLLMConnector(LLMConnector):
                 
                 if msg.tool_calls:
                     for tool_call in msg.tool_calls:
+                        # Safety: limit total tool calls
                         tool_calls_count += 1
                         if tool_calls_count > MAX_TOOL_CALLS:
                             log.warning(f"[LiteLLM] Tool call limit reached ({MAX_TOOL_CALLS})")
-                            return "Error: Too many tool calls. Stopping for safety."
+                            msg = "Error: Too many tool calls. Stopping for safety."
+                            if tool_actions:
+                                footer = _build_tool_footer(tool_actions)
+                                msg = f"{msg}\n\n__TOOL_FOOTER__\n{footer}"
+                            return msg
                         
                         func_name = tool_call.function.name
                         
+                        # Parse arguments safely
                         try:
                             raw_args = tool_call.function.arguments or "{}"
                             args = json.loads(raw_args)
@@ -1635,24 +1224,33 @@ class LiteLLMConnector(LLMConnector):
                         
                         log.info(f"[LiteLLM] Turn {turn+1}: {func_name}({list(args.keys())})")
                         
-                        recent_tools.append(func_name)
+                        # Loop detection: same tool + same args = real loop. Same tool + different args (e.g. bash cmd1, bash cmd2) = OK
+                        args_fingerprint = json.dumps(args, sort_keys=True)[:200] if args else ""
+                        call_signature = (func_name, args_fingerprint)
+                        recent_tools.append(call_signature)
                         if len(recent_tools) > MAX_REPEAT:
                             recent_tools.pop(0)
                         
+                        # Only nudge when the exact same call (tool + args) is repeated
                         if len(recent_tools) >= MAX_REPEAT and len(set(recent_tools)) == 1:
-                            log.warning(f"[LiteLLM] Loop detected: {func_name} called {MAX_REPEAT}x")
+                            log.warning(f"[LiteLLM] Loop detected: same {func_name}(...) called {MAX_REPEAT}x in a row")
                             messages.append({
                                 "role": "user",
-                                "content": "STOP. You're repeating the same action. Summarize what you've found so far."
+                                "content": (
+                                    f"[System note: You just called {func_name} with the same arguments again — {MAX_REPEAT} times in a row.] "
+                                    "Pause. Think: what did the previous results show? Try a different tool, different arguments, or answer from what you have. Do not repeat the exact same call."
+                                )
                             })
                             recent_tools = []
-                            continue 
+                            continue
                         
+                        # Execute tool
                         func = TOOL_MAP.get(func_name)
                         if func:
                             try:
                                 result = func(**args)
                             except TypeError as e:
+                                # Wrong arguments
                                 result = f"Error: Invalid arguments for {func_name}: {e}"
                                 log.warning(f"[LiteLLM] {result}")
                             except Exception as e:
@@ -1661,9 +1259,11 @@ class LiteLLMConnector(LLMConnector):
                         else:
                             result = f"Unknown tool: {func_name}. Available: {', '.join(TOOL_MAP.keys())}"
                         
+                        # Log result preview
                         result_preview = str(result)[:100]
                         log.debug(f"[LiteLLM] {func_name} -> {result_preview}...")
                         
+                        # Track for user-visible summary
                         tool_actions.append(_format_tool_action(func_name, args, str(result)[:200]))
                         
                         messages.append({
@@ -1672,18 +1272,47 @@ class LiteLLMConnector(LLMConnector):
                             "name": func_name,
                             "content": str(result)[:4000]
                         })
-                    
                 else:
-                    # Append tool usage summary with unique separator
-                    # so handlers.py can split it out before parsing
+                    # No tool calls = final response — clear any rate limit
+                    from llm.rate_limits import clear_limit
+                    clear_limit("litellm")
+                    
+                    final = msg.content or "(empty response)"
+                    
+                    # Append tool usage summary if any tools were called
                     if tool_actions:
                         footer = _build_tool_footer(tool_actions)
-                        return (msg.content or "") + f"\n\n__TOOL_FOOTER__\n{footer}"
+                        final = f"{final}\n\n__TOOL_FOOTER__\n{footer}"
                     
-                    return msg.content or ""
+                    return final
                     
             except Exception as e:
-                log.error(f"LiteLLM call error: {e}", exc_info=True)
-                return f"Error connecting to LLM: {e}"
+                err_str = str(e)
+                log.error(f"[LiteLLM] API Error on turn {turn+1}: {err_str[:200]}")
+                
+                # Handle rate limits smartly
+                if "429" in err_str or "RateLimitError" in err_str or "rate" in err_str.lower():
+                    from llm.rate_limits import record_rate_limit, should_auto_retry
+                    record_rate_limit("litellm", err_str)
+                    
+                    # Auto-retry if short limit (< 90s)
+                    wait = should_auto_retry("litellm")
+                    if wait and wait <= 90 and turn == 0:
+                        import asyncio
+                        log.info(f"[LiteLLM] Short rate limit, auto-retrying in {wait:.0f}s...")
+                        await asyncio.sleep(wait + 1)
+                        continue  # Retry the same turn
+                
+                # Don't crash on API errors, return error message
+                msg = f"Error: LLM API failed: {err_str[:200]}"
+                if tool_actions:
+                    footer = _build_tool_footer(tool_actions)
+                    msg = f"{msg}\n\n__TOOL_FOOTER__\n{footer}"
+                return msg
         
-        return "Error: Maximum turns reached."
+        log.warning(f"[LiteLLM] Max turns ({MAX_TURNS}) reached, {tool_calls_count} tool calls")
+        msg = "I made too many attempts. Please try a simpler request."
+        if tool_actions:
+            footer = _build_tool_footer(tool_actions)
+            msg = f"{msg}\n\n__TOOL_FOOTER__\n{footer}"
+        return msg

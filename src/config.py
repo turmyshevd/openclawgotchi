@@ -28,7 +28,7 @@ ALLOWED_USERS = os.environ.get("ALLOWED_USERS", "")  # comma-separated IDs
 ALLOWED_GROUPS = os.environ.get("ALLOWED_GROUPS", "")  # comma-separated IDs
 ALLOW_ALL_USERS = _env_flag("ALLOW_ALL_USERS", False)
 CLAUDE_TIMEOUT = int(os.environ.get("CLAUDE_TIMEOUT", "600"))
-HISTORY_LIMIT = int(os.environ.get("HISTORY_LIMIT", "50"))
+HISTORY_LIMIT = int(os.environ.get("HISTORY_LIMIT", "10"))
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini/gemini-2.0-flash")
 GEMINI_API_BASE = os.environ.get("GEMINI_API_BASE", "")  # Optional override for Z.ai/OpenAI
 BOT_LANGUAGE = os.environ.get("BOT_LANGUAGE", "en")  # Default response language
@@ -60,7 +60,7 @@ HEARTBEAT_FIRST_RUN = 60    # First heartbeat after 1 minute
 TELEGRAM_MSG_LIMIT = 4096   # Max message length
 LEVEL_UP_DISPLAY_DELAY = 15 # Seconds to wait before showing level-up on E-Ink
 MAX_TOOL_CALLS = 20         # Max tool calls per LLM request
-LLM_TIMEOUT = 120           # Seconds timeout for LLM API calls
+LLM_TIMEOUT = 999           # Seconds timeout for LLM API calls
 # Model context window (tokens). Used for /context "how full is the model's window"
 MODEL_CONTEXT_TOKENS = int(os.environ.get("MODEL_CONTEXT_TOKENS", "128000"))
 

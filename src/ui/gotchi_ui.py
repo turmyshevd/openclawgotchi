@@ -73,9 +73,69 @@ def get_system_stats():
 
 
 def _load_all_faces() -> dict:
-    """Load all faces using the central logic in ui.faces."""
-    from ui.faces import get_all_faces
-    return get_all_faces()
+    """
+    Load all faces: default + custom (from data/custom_faces.json).
+    Custom faces override defaults if name matches.
+    """
+    # Default faces (THE SINGLE SOURCE OF TRUTH)
+    default_faces = {
+        # === BASIC EMOTIONS ===
+        "happy":        "(◕‿◕)",
+        "happy2":       "(•‿‿•)",
+        "sad":          "(╥☁╥ )",
+        "excited":      "(ᵔ◡◡ᵔ)",
+        "thinking":     "(￣ω￣)",
+        "love":         "(♥‿‿♥)",
+        "surprised":    "(◉_◉)",
+        "grateful":     "(^‿‿^)",
+        "motivated":    "(☼‿‿☼)",
+        
+        # === STATES ===
+        "bored":        "(-__-)",
+        "sleeping":     "( -_-)zZ",
+        "sleeping_pwn": "(⇀‿‿↼)", # Pwnagotchi style
+        "awakening":    "(≖‿‿≖)",
+        "observing":    "( ⚆⚆)",
+        "intense":      "(°▃▃°)",
+        "cool":         "(⌐■_■)",
+        "chill":        "(▰˘◡˘▰)",
+        "hype":         "(╯°□°）╯",
+        "hacker":       "[■_■]",
+        "smart":        "(✜‿‿✜)",
+        "broken":       "(☓‿‿☓)",
+        "debug":        "(#__#)",
+        
+        # === EXTENDED ===
+        "angry":        "(╬ಠ益ಠ)",
+        "crying":       "(ಥ﹏ಥ)",
+        "proud":        "(๑•̀ᴗ•́)و",
+        "nervous":      "(°△°;)",
+        "confused":     "(◎_◎;)",
+        "mischievous":  "(◕‿↼)",
+        "wink":         "(◕‿◕✿)",
+        "dead":         "(✖_✖)",
+        "shock":        "(◯△◯)",
+        "suspicious":   "(¬_¬)",
+        "smug":         "(￣ω￣)",
+        "cheering":     "\\(◕◡◕)/",
+        "celebrate":    "★(◕‿◕)★",
+        "dizzy":        "(@_@)",
+        "lonely":       "(ب__ب)",
+        "demotivated":  "(≖__≖)",
+    }
+    
+    # Load custom faces from JSON
+    custom_faces = {}
+    try:
+        from config import CUSTOM_FACES_PATH
+        if CUSTOM_FACES_PATH.exists():
+            custom_faces = json.loads(CUSTOM_FACES_PATH.read_text())
+    except Exception:
+        pass  # If file doesn't exist or invalid, just use defaults
+    
+    # Merge: custom override defaults
+    faces = {**default_faces, **custom_faces}
+    return faces
 
 
 def render_ui(mood="happy", status_text="", fast_mode=True):

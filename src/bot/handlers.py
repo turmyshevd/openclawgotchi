@@ -3,6 +3,7 @@ Telegram command and message handlers.
 """
 
 import logging
+import re
 
 from telegram import Update
 from telegram.constants import ChatAction
@@ -564,44 +565,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         response, connector = await router.call(user_text, history)
         log.info(f"[{sender}] <- [{connector}] {response[:80]}")
         
-        # Check for error response — retry once for transient errors
+        # Check for error response (e.g. from LiteLLM)
         if response.startswith("Error:"):
-            # Transient errors worth retrying (network, timeout, etc.)
-            transient_keywords = ["timeout", "connect", "rate", "500", "502", "503", "429"]
-            is_transient = any(kw in response.lower() for kw in transient_keywords)
-            
-            if is_transient:
-                log.warning(f"[Retry] Transient error, retrying: {response[:80]}")
-                import asyncio
-                await asyncio.sleep(2)
-                try:
-                    response, connector = await router.call(user_text, history)
-                except Exception as retry_err:
-                    log.error(f"[Retry] Failed again: {retry_err}")
-                    response = f"Error (after retry): {retry_err}"
-                    connector = "litellm"
-            
-            # If still an error after retry (or non-transient), show it
-            if response.startswith("Error:"):
-                error_screen(response)
-                await update.message.reply_text(response)
-                return
+            error_screen(response)
+            await update.message.reply_text(response)
+            return
         
-        # Separate tool footer from LLM response (footer added by connector)
+        # Separate tool footer from LLM response
         tool_footer = ""
         if "__TOOL_FOOTER__" in response:
             parts = response.split("__TOOL_FOOTER__", 1)
             response = parts[0].rstrip()
             tool_footer = parts[1].strip()
         
-        # Parse hardware commands (do NOT execute automatically, we handle it below)
-        clean_text, cmds = parse_and_execute_commands(response, execute=False)
+        # Parse hardware commands
+        clean_text, cmds = parse_and_execute_commands(response)
         
-        # Execute FACE command if provided (with smart text fallback)
-        if cmds.get("face"):
-            show_face(mood=cmds["face"], text=cmds.get("display") or clean_text[:50])
         # Fallback: if LLM didn't include FACE:, show a default face
-        else:
+        if not cmds.get("face"):
             show_face(mood="happy", text=clean_text[:50] if clean_text else "...")
         
         # Execute memory command
@@ -622,7 +603,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception as e:
                 log.error(f"Failed to send mail: {e}")
         
-        # Save response WITHOUT tool footer (so LLM doesn't learn to echo it)
+        # Save response
         save_message(conv_id, "assistant", response)
         
         # Check if onboarding completed
@@ -645,24 +626,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if cmd_notes:
             clean_text += "\n\n```\n🔧 " + "\n  ".join(cmd_notes) + "\n```"
         
-        # Append tool footer AFTER parsing (so it doesn't break command parsing)
-        if tool_footer:
-            clean_text += f"\n\n{tool_footer}"
-        
-        # Mode indicator only for Pro (Lite = default, no label)
         if connector != "litellm":
             clean_text += "\n\n🧠 Pro"
-        
-        # Send main response (which now includes tool usage as before)
+            
+        # Append tool usage summary if exists
+        if tool_footer:
+            clean_text += "\n\n" + tool_footer
+            
         await send_long_message(update, clean_text, parse_mode="Markdown" if connector == "litellm" else None)
 
         # AWARD XP LAST — Avoid Level Up overwriting the response on E-Ink
         from db.stats import on_message_answered, on_tool_use
         on_message_answered()
         
-        # Count tool actions from response footer for XP bonus
-        import re
-        tool_match = re.search(r'Tool usage \((\d+)\):', response)
+        tool_source = tool_footer or response
+        tool_match = re.search(r'Tool usage \((\d+)\):', tool_source)
         if tool_match:
             on_tool_use(int(tool_match.group(1)))
         # Also count parsed commands (MAIL:, REMEMBER:) as tool-like actions

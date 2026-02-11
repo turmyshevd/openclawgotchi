@@ -76,7 +76,7 @@ async def run_cron_job(job):
         return
     
     bot = Bot(token=BOT_TOKEN)
-    fallback_text = f"⏰ Reminder: {job.name}"
+    fallback_text = f"⏰ Напоминание: {job.name}"
     
     async def send_to_owner(text: str):
         if internal_reminder:

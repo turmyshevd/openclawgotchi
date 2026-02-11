@@ -84,20 +84,17 @@ def init_db():
             read_at TEXT
         )
     """)
-    # Migration: brother bot or scripts may expect "sender" or "sender_bot" column (alias for from_bot)
+    # Migration: brother bot or scripts may expect "sender" column (alias for from_bot)
     for table in ("bot_mail", "botmail"):
         try:
             cursor = conn.cursor()
             cursor.execute(f"PRAGMA table_info({table})")
             columns = [row[1] for row in cursor.fetchall()]
-            if not columns: continue
-            
-            for col in ("sender", "sender_bot"):
-                if col not in columns:
-                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} TEXT")
-                    if "from_bot" in columns:
-                        conn.execute(f"UPDATE {table} SET {col} = from_bot WHERE {col} IS NULL")
-            conn.commit()
+            if columns and "sender" not in columns:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN sender TEXT")
+                if "from_bot" in columns:
+                    conn.execute(f"UPDATE {table} SET sender = from_bot WHERE sender IS NULL")
+                conn.commit()
         except Exception:
             pass
     
