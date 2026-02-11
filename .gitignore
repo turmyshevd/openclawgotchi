@@ -111,5 +111,9 @@ README_HANDOVER.md
 sync.sh
 refresh_remote_token.sh
 
+# Archives and Lore
+archive/
+lore/
+
 # Personal commands
 .claude/commands/
