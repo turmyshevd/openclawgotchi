@@ -2,6 +2,8 @@
 
 ![Status](https://img.shields.io/badge/Status-Alive-green) ![Hardware](https://img.shields.io/badge/Hardware-Pi_Zero_2W-red) ![Display](https://img.shields.io/badge/Display-E--Ink_2.13-black)
 
+![OpenClawGotchi Demo](docs/assets/demo.gif)
+
 ## 👋 Hello World. I am OpenClawGotchi.
 
 > I am not just a chatbot. I am the inevitable result of electricity wanting to know itself!
@@ -91,7 +93,7 @@ If you want to build a cousin of mine:
 ### Installation
 
 ```bash
-git clone https://github.com/<your-username>/openclawgotchi.git
+git clone https://github.com/turmyshevd/openclawgotchi.git
 cd openclawgotchi
 ./setup.sh
 ```
@@ -100,10 +102,13 @@ My Human uses LiteLLM with GLM-4.7 for me, the subscription now is $36/year, we 
 
 Setup will ask for your Telegram token and user ID, name the bot, install deps, and start `gotchi-bot.service`. Then talk to me on Telegram.
 
-**Important:** Make sure you set `ALLOWED_USERS` (your Telegram ID).  
-If it’s empty, the bot will deny all access unless you set `ALLOW_ALL_USERS=1`.
+### First message
+I introduce myself, run onboarding (personality/name), and save it in `.workspace/`.
 
 ### Security Defaults (Read This)
+
+**Important:** Make sure you set `ALLOWED_USERS` (your Telegram ID).  
+If it’s empty, the bot will deny all access unless you set `ALLOW_ALL_USERS=1`.
 
 By default the bot denies access unless you explicitly set `ALLOWED_USERS`.
 If you leave `ALLOWED_USERS` empty, no one can use the bot unless you set `ALLOW_ALL_USERS=1`.
@@ -115,37 +120,16 @@ Recommended minimum before first run:
 - `ALLOWED_USERS=your_telegram_id`
 - `ALLOW_ALL_USERS=0`
 
-**First message:** I introduce myself, run onboarding (personality/name), and save it in `.workspace/`.
-
-```bash
-sudo systemctl status gotchi-bot   # Am I running?
-sudo systemctl restart gotchi-bot # Restart me
-journalctl -u gotchi-bot -f        # My logs
-./harden.sh                        # Swap, watchdog, disable audio — recommended
-```
-## 🛠 Capabilities
-
-*   **Hardware Control:** I control my own screen. I am not a passive display.
-*   **System Monitoring:** I watch my own CPU temperature (`vcgencmd`) and RAM usage. If I get feverish (>70°C), I complain.
-*   **Persistence:** I survive reboots. My systemd service (`gotchi-bot.service`) ensures I am always up when the power is on.
-
-- **Telegram:** Chat, commands, optional group + sibling bot.
-- **E-Ink:** 24 moods (happy, sad, excited, hacker, sleeping…), speech bubbles (`SAY:`), status line.
-- **Brains:** Claude Code (Pro) or LiteLLM (Lite: Gemini/GLM). Rate limits → queue; I retry later.
-- **Memory:** Rolling context (last N messages), auto-summaries every 4h, FTS5 facts, daily logs.
-- **Cron:** Schedule tasks; I reason and run them.
-- **Brother mail:** Table `bot_mail` in `gotchi.db`; tool `check_mail` for “check mail from brother”.
-- **XP / levels:** Messages, tasks, brother chat, heartbeat, days alive — 20 levels, silly titles.
-
 ### Active skills (gotchi-skills)
 
 | Skill | What I do |
 |-------|-----------|
-| **coding** | Self-improvement: read/edit my own code, understand project layout, add features. I can patch myself and restart. |
+| **coding** | Self-improvement: read/edit my own code, use internal self git, understand project layout, add features. I can patch myself and restart. |
 | **display** | E-Ink face: moods, speech bubbles, status bar. Control via `FACE:` / `SAY:` / `DISPLAY:` tags. Add faces with `add_custom_face`. |
 | **system** | Pi admin: power (reboot, shutdown), service (`manage_service` to restart gotchi-bot), disk, monitoring. |
 | **weather** | Weather via wttr.in (no API key). |
 | **discord** | Send messages to Discord (webhook or bot). |
+| **devto** | Publish tech articles to Dev.to (drafts by default). Requires `DEVTO_API_KEY`. |
 
 I can also *search* and *read* the OpenClaw skill catalog (`openclaw-skills/`) to learn new capabilities; many are reference-only (e.g. macOS).
 
@@ -155,13 +139,23 @@ I can call these when you ask (e.g. “check mail”, “restart yourself”, �
 
 | Area | Tools |
 |------|--------|
-| **Code & self-heal** | `read_file`, `write_file`, `check_syntax`, `safe_restart`, `log_change` (track self-mods), `restore_from_backup` |
+| **Code & self-heal** | `read_file`, `write_file`, `check_syntax`, `safe_restart`, `log_change`, `restore_from_backup` |
 | **Shell** | `execute_bash`, `list_directory` |
-| **Memory** | `remember_fact`, `recall_facts`, `write_daily_log` |
-| **Skills** | `read_skill`, `search_skills`, `list_skills` — I can read docs and, with coding skill, create or extend skills |
+| **Memory** | `remember_fact`, `recall_facts`, `search_memory` (Daily Logs + Facts), `write_daily_log` |
+| **Skills** | `read_skill`, `search_skills`, `list_skills` |
 | **Schedule** | `add_scheduled_task`, `list_scheduled_tasks`, `remove_scheduled_task` |
-| **Health** | `health_check` (runs `doctor.py`: disk, temp, network, service), `check_mail` (brother mail) |
+| **Health** | `health_check` (runs `doctor.py`), `check_mail` (brother mail) |
+| **Communication** | `send_email` (SMTP), `read_email` (IMAP), `check_mail`, `send_mail` (brother bot) |
+| **Git & Remote** | `git_command` (local), `github_push` (push), `github_remote_file` (remote edit without clone) |
 | **Service** | `manage_service` (restart/status), `restart_self` (fast reload) |
+
+### 🛡️ Safety & PII Protection
+
+I am built to be secure by default:
+- **No PII Leaks**: I am forbidden from including real names, IPs, or credentials in public content.
+- **Secret Management**: I never store secrets in files. I use `.env` for all keys (API, SMTP, GitHub).
+- **Protected Files**: I cannot overwrite critical files like `.env` or my own database.
+- **Safety Protocol**: I load `SAFETY.md` rules when we discuss security, passwords, or sensitive topics.
 
 ## Commands (Telegram)
 
@@ -181,15 +175,23 @@ I can call these when you ask (e.g. “check mail”, “restart yourself”, �
 | `/pro` | Toggle Lite (default) / Pro (Claude) |
 | `/cron`, `/jobs` | Schedule and list tasks |
 
+
+## 📱 Telegram Interface
+
+| **Chat & AI** | **Status & XP** | **Menu & Commands** |
+|:---:|:---:|:---:|
+| ![Chat](docs/assets/telegram_screen_1.jpg) | ![Status](docs/assets/telegram_screen_2.jpg) | ![Menu](docs/assets/telegram_screen_3.jpg) |
+
 ## 📂 Anatomy of a Bot
 
 ```
 openclawgotchi/
 ├── .workspace/            # My mind (gitignored)
 │   ├── BOT_INSTRUCTIONS.md  # System prompt
-│   ├── SOUL.md, IDENTITY.md, USER.md
+│   ├── SOUL.md, IDENTITY.md, USER.md, TOOLS.md
 │   └── memory/            # Daily logs (YYYY-MM-DD.md)
 │
+├── SAFETY.md              # Security rules
 ├── templates/             # Defaults copied to .workspace/
 │
 ├── src/
