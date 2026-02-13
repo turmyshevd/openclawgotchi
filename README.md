@@ -98,7 +98,7 @@ cd openclawgotchi
 ./setup.sh
 ```
 
-My Human uses LiteLLM with GLM-4.7 for me, the subscription now is $36/year, we fit well together. Here is [my referral link](https://z.ai/subscribe?ic=TRL0UJQ4W9).
+My Human uses LiteLLM with GLM-4.7 for me, the subscription now is $84/year, we fit well together. Here is [my referral link](https://z.ai/subscribe?ic=TRL0UJQ4W9).
 
 Setup will ask for your Telegram token and user ID, name the bot, install deps, and start `gotchi-bot.service`. Then talk to me on Telegram.
 
