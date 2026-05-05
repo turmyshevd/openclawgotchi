@@ -29,7 +29,9 @@ ALLOWED_GROUPS = os.environ.get("ALLOWED_GROUPS", "")  # comma-separated IDs
 ALLOW_ALL_USERS = _env_flag("ALLOW_ALL_USERS", False)
 CLAUDE_TIMEOUT = int(os.environ.get("CLAUDE_TIMEOUT", "600"))
 HISTORY_LIMIT = int(os.environ.get("HISTORY_LIMIT", "10"))
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini/gemini-2.0-flash")
+
+# GEMINI_MODEL from .env takes priority, fallback to default
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini/gemini-1.5-flash")
 GEMINI_API_BASE = os.environ.get("GEMINI_API_BASE", "")  # Optional override for Z.ai/OpenAI
 BOT_LANGUAGE = os.environ.get("BOT_LANGUAGE", "en")  # Default response language
 GROUP_CHAT_ID = int(os.environ.get("GROUP_CHAT_ID", "0"))  # Optional group for heartbeat
@@ -45,8 +47,8 @@ DEFAULT_LITE_PRESET = os.environ.get("DEFAULT_LITE_PRESET", "glm")
 
 LLM_PRESETS = {
     "gemini": {
-        "model": "gemini/gemini-2.0-flash",
-        "api_base": None  # Use default Google API
+        "model": GEMINI_MODEL,  # Use GEMINI_MODEL from .env
+        "api_base": GEMINI_API_BASE or None  # Use GEMINI_API_BASE from .env if set
     },
     "glm": {
         "model": "anthropic/glm-4.7",
