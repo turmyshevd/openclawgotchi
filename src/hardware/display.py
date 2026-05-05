@@ -96,7 +96,7 @@ def parse_and_execute_commands(response: str) -> tuple[str, dict]:
     """
     lines = response.strip().splitlines()
     clean_lines = []
-    commands = {"face": None, "display": None, "dm": None, "group": None, "mail": None}
+    commands = {"face": None, "display": None, "dm": None, "group": None}
     
     for line in lines:
         stripped = line.strip()
@@ -139,12 +139,6 @@ def parse_and_execute_commands(response: str) -> tuple[str, dict]:
         elif stripped.upper().startswith("REMEMBER:"):
             fact = stripped[9:].strip()
             commands["remember"] = fact
-
-        # MAIL: <message> — reply to brother
-        elif stripped.upper().startswith("MAIL:"):
-            msg = stripped[5:].strip()
-            commands["mail"] = msg
-            log.info(f"CMD MAIL: {msg[:50]}...")
 
         # Skip lone HTML-like tags (LLM sometimes outputs </...> before FACE:)
         elif re.match(r"^\s*</?\w+>\s*$", stripped):

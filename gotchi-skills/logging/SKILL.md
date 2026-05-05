@@ -34,7 +34,7 @@ You have several log sinks. Use them so you (and Dmitry) can see what broke and 
 - **health_check() found problems:**  
   Call `log_error("health_check: <what’s wrong>")` so there’s a record.
 
-- **User says “что сломалось” / “what went wrong”:**  
+- **User says “what went wrong”:**  
   Read `data/ERROR_LOG.md` (and optionally `data/display_error.log`) and summarize.
 
 - **Daily / notable events:**  

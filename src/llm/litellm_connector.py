@@ -5,6 +5,7 @@ LiteLLM connector — full-featured fallback with tools.
 import contextvars
 import json
 import logging
+import shlex
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -53,6 +54,12 @@ DANGEROUS_COMMANDS = [
     "sudo rm -rf",
 ]
 
+DISALLOWED_SHELL_TOKENS = {
+    "|", "||", "&", "&&", ";", "<", ">", ">>", "<<", "<<<",
+}
+BLOCKED_EXECUTABLES = {"sudo", "su", "doas"}
+SHELL_INTERPRETERS = {"sh", "bash", "zsh", "fish", "dash"}
+
 # Protected files (cannot be written/deleted)
 PROTECTED_FILES = [
     ".env",
@@ -91,12 +98,38 @@ def _sanitize_string(s: str, max_len: int = 10000) -> str:
     return str(s)[:max_len]
 
 
+def _parse_command_args(command: str) -> tuple[list[str], Optional[str]]:
+    """Parse a simple command and reject shell chaining/redirection."""
+    try:
+        args = shlex.split(command, posix=True)
+    except ValueError as e:
+        return [], f"Error: Invalid command syntax ({e})"
+
+    if not args:
+        return [], "Error: Empty command"
+
+    if any(token in DISALLOWED_SHELL_TOKENS for token in args):
+        return [], "Error: Pipes, redirection, and command chaining are blocked for safety."
+
+    if "`" in command or "$(" in command or "\n" in command or "\r" in command:
+        return [], "Error: Shell substitution and multiline commands are blocked for safety."
+
+    executable = Path(args[0]).name.lower()
+    if executable in BLOCKED_EXECUTABLES:
+        return [], f"Error: '{executable}' is blocked in execute_bash. Use a dedicated tool instead."
+
+    if executable in SHELL_INTERPRETERS:
+        return [], f"Error: Launching nested shells via '{executable}' is blocked for safety."
+
+    return args, None
+
+
 # ============================================================
 # TOOLS
 # ============================================================
 
 def execute_bash(command: str, timeout: int = 999) -> str:
-    """Execute a shell command."""
+    """Execute a simple command without shell features."""
     # Validate
     if not command or not command.strip():
         return "Error: Empty command"
@@ -107,13 +140,17 @@ def execute_bash(command: str, timeout: int = 999) -> str:
     if _is_dangerous_command(command):
         log.warning(f"Blocked dangerous command: {command[:50]}")
         return "Error: Command blocked for safety. Use safer alternatives."
+
+    args, parse_error = _parse_command_args(command)
+    if parse_error:
+        return parse_error
     
     # Limit timeout
     timeout = min(timeout, 999)  # Max 16 minutes
     
     try:
         result = subprocess.run(
-            command, shell=True, capture_output=True, text=True,
+            args, shell=False, capture_output=True, text=True,
             timeout=timeout, cwd=str(PROJECT_DIR)
         )
         output = ""
@@ -613,20 +650,78 @@ def log_error(message: str) -> str:
         return f"Error writing log: {e}"
 
 
-def check_mail() -> str:
-    """
-    Check unread mail from sibling/brother bot. Use when user asks to check mail or messages from brother.
-    Mail is stored in the same DB as the bot (gotchi.db, table bot_mail). Returns list of unread or 'No unread mail'.
-    """
+def vault_write(
+    title: str,
+    raw_text: str,
+    summary: str = "",
+    body: str = "",
+    source: str = "telegram",
+    note_type: str = "memo",
+    project: str = "",
+    topic: str = "",
+    tags: Optional[list[str]] = None,
+    links: Optional[list[str]] = None,
+) -> str:
+    """Write a note into the Obsidian vault."""
+    if not title or not title.strip():
+        return "Error: title required"
+    if not raw_text or not raw_text.strip():
+        raw_text = title
+
     try:
-        from bot.heartbeat import get_unread_mail
-        mail = get_unread_mail()
-        if not mail:
-            return "No unread mail from brother."
-        lines = [f"From {m['from']} ({m['timestamp']}): {m['message']}" for m in mail]
-        return "\n".join(lines)
+        from memory.vault import capture_note
+
+        result = capture_note(
+            title=title.strip(),
+            raw_text=raw_text.strip(),
+            summary=summary.strip() if summary else "",
+            body=body.strip() if body else "",
+            source=source.strip() if source else "telegram",
+            note_type=note_type.strip() if note_type else "memo",
+            project=project.strip() if project else "",
+            topic=topic.strip() if topic else "",
+            tags=tags or [],
+            links=links or [],
+        )
+        return (
+            f"Saved vault note: {result.title}\n"
+            f"note_path={result.note_path}\n"
+            f"inbox_path={result.inbox_path}\n"
+            f"index_path={result.index_path}"
+        )
     except Exception as e:
-        return f"Error checking mail: {e}"
+        return f"Error writing vault note: {e}"
+
+
+def vault_read(path: str) -> str:
+    """Read a file inside the vault."""
+    if not path or not path.strip():
+        return "Error: path required"
+    try:
+        from memory.vault import read_vault_file
+        return read_vault_file(path)
+    except Exception as e:
+        return f"Error reading vault file: {e}"
+
+
+def vault_list(path: str = ".") -> str:
+    """List files inside the vault."""
+    try:
+        from memory.vault import list_vault
+        return list_vault(path)
+    except Exception as e:
+        return f"Error listing vault: {e}"
+
+
+def vault_search(query: str, limit: int = 10) -> str:
+    """Search the vault for prior notes."""
+    if not query or not query.strip():
+        return "Error: query required"
+    try:
+        from memory.vault import search_vault
+        return search_vault(query, limit)
+    except Exception as e:
+        return f"Error searching vault: {e}"
 
 
 def restore_from_backup(file_path: str) -> str:
@@ -784,7 +879,7 @@ def manage_service(service: str, action: str = "status") -> str:
 TOOLS = [
     {"type": "function", "function": {
         "name": "execute_bash",
-        "description": "Run a shell command",
+        "description": "Run a simple command without shell features. No pipes, redirection, &&, or sudo.",
         "parameters": {"type": "object", "properties": {
             "command": {"type": "string"},
             "timeout": {"type": "integer"}
@@ -921,9 +1016,42 @@ TOOLS = [
         }, "required": ["file_path"]}
     }},
     {"type": "function", "function": {
-        "name": "check_mail",
-        "description": "Check unread mail from sibling/brother bot. Use when user asks to check mail, check mail from brother, or check messages. Mail is in the same DB as the bot (gotchi.db). Do NOT invent paths like probro.db.",
-        "parameters": {"type": "object", "properties": {}, "required": []}
+        "name": "vault_write",
+        "description": "Create or update a markdown note in .workspace/knowledge. Use for memo capture, project notes, and actions. No fixed categories; infer project/topic/tags from the message. If something is unclear, ask a short clarification before calling this.",
+        "parameters": {"type": "object", "properties": {
+            "title": {"type": "string", "description": "Short note title"},
+            "raw_text": {"type": "string", "description": "Original memo text"},
+            "summary": {"type": "string", "description": "Short summary or interpretation"},
+            "body": {"type": "string", "description": "Optional structured body / note content"},
+            "source": {"type": "string", "description": "Source label, usually telegram"},
+            "note_type": {"type": "string", "description": "Flexible note type such as memo, claim, metric, action, question, decision, content-idea"},
+            "project": {"type": "string", "description": "Free-form project name if obvious"},
+            "topic": {"type": "string", "description": "Free-form topic if obvious"},
+            "tags": {"type": "array", "items": {"type": "string"}},
+            "links": {"type": "array", "items": {"type": "string"}}
+        }, "required": ["title", "raw_text"]}
+    }},
+    {"type": "function", "function": {
+        "name": "vault_read",
+        "description": "Read a file inside .workspace/knowledge only.",
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string"}
+        }, "required": ["path"]}
+    }},
+    {"type": "function", "function": {
+        "name": "vault_list",
+        "description": "List files/directories inside .workspace/knowledge only.",
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string"}
+        }, "required": []}
+    }},
+    {"type": "function", "function": {
+        "name": "vault_search",
+        "description": "Search markdown notes inside .workspace/knowledge. Use this to find prior project knowledge before writing a new memo.",
+        "parameters": {"type": "object", "properties": {
+            "query": {"type": "string"},
+            "limit": {"type": "integer"}
+        }, "required": ["query"]}
     }},
     {"type": "function", "function": {
         "name": "add_custom_face",
@@ -982,7 +1110,10 @@ TOOL_MAP = {
     "health_check": health_check,
     "log_error": log_error,
     "restore_from_backup": restore_from_backup,
-    "check_mail": check_mail,
+    "vault_write": vault_write,
+    "vault_read": vault_read,
+    "vault_list": vault_list,
+    "vault_search": vault_search,
 }
 
 
@@ -993,7 +1124,6 @@ TOOL_MAP = {
 # Human-friendly descriptions for tool actions
 _TOOL_ICONS = {
     "show_face": "😎",
-    "check_mail": "📬",
     "remember_fact": "🧠",
     "recall_facts": "🔍",
     "recall_messages": "💬",
@@ -1012,6 +1142,10 @@ _TOOL_ICONS = {
     "list_scheduled_tasks": "📅",
     "search_skills": "🔎",
     "read_skill": "📖",
+    "vault_write": "📓",
+    "vault_read": "📘",
+    "vault_list": "📂",
+    "vault_search": "🔎",
 }
 
 
@@ -1024,9 +1158,6 @@ def _format_tool_action(func_name: str, args: dict, result: str) -> str:
         mood = args.get("mood", "?")
         text = args.get("text", "")
         return f"{icon} face: {mood}" + (f' "{text[:30]}"' if text else "")
-    
-    elif func_name == "check_mail":
-        return f"{icon} checked mail: {result[:60]}"
     
     elif func_name == "remember_fact":
         fact = args.get("content", args.get("fact", ""))[:40]
@@ -1068,6 +1199,23 @@ def _format_tool_action(func_name: str, args: dict, result: str) -> str:
 
     elif func_name == "safe_restart":
         return f"{icon} restart"
+
+    elif func_name == "vault_write":
+        title = args.get("title", "")
+        note_type = args.get("note_type", "memo")
+        return f"{icon} saved vault note: \"{title[:40]}\" ({note_type})"
+
+    elif func_name == "vault_read":
+        path = args.get("path", "")
+        return f"{icon} read vault file: {path}"
+
+    elif func_name == "vault_list":
+        path = args.get("path", ".")
+        return f"{icon} listed vault: {path}"
+
+    elif func_name == "vault_search":
+        query = args.get("query", "")
+        return f"{icon} searched vault: \"{query}\""
     
     else:
         # Generic format

@@ -2,6 +2,18 @@
 
 All notable changes to the OpenClawGotchi project will be documented in this file.
 
+## [Unreleased] - 2026-04-29
+
+### Added
+- **Obsidian-Pro Skill**: Advanced knowledge capture based on `kepano/obsidian-skills`. Includes support for Obsidian Callouts (`[!abstract]`, `[!quote]`), YAML properties (status, project, topic), and wikilink prioritization.
+- **Smart Message Heuristics**: Added a fast-path classifier in `vault.py` that identifies common casual phrases (greetings, acks) locally. This skips LLM calls, saving tokens and reducing response latency by ~2s on Raspberry Pi.
+- **Digital Gardening Metadata**: New notes are automatically tagged with `status: "seedling"` in YAML frontmatter for Obsidian-compatible life-cycle tracking.
+
+### Changed
+- **Softened Casual Filter**: Casual messages no longer return a flat "ok". The bot now responds using its full personality (`SOUL.md`) while skipping the knowledge vault injection to keep the context clean.
+- **`VAULT.md` Template**: Updated with instructions for "Obsidian-native" formatting and cross-note linking.
+- **`README.md`**: Added sections on "Obsidian Pro" and the "Knowledge Vault" origin story.
+
 ## [Unreleased] - 2026-02-06
 
 ### Added

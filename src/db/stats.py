@@ -1,6 +1,6 @@
 """
 XP & Stats system — Pwnagotchi-style leveling.
-Tracks: messages answered, days alive, tasks completed, brother chats.
+Tracks: messages answered, days alive, tasks completed, knowledge captures.
 """
 
 import sqlite3
@@ -15,7 +15,7 @@ log = logging.getLogger(__name__)
 # XP rewards (RPG-style)
 XP_MESSAGE = 10        # Per message answered
 XP_TASK = 25           # Per task completed
-XP_BROTHER_CHAT = 50   # Per brother interaction
+XP_KNOWLEDGE_CAPTURE = 50  # Per vault capture
 XP_DAY_ALIVE = 100     # Per day survived
 XP_HEARTBEAT = 5       # Per successful heartbeat
 XP_TOOL_USE = 5        # Per tool used in a response (capped per message)
@@ -94,7 +94,7 @@ def init_stats_table():
         ("xp", 0),
         ("messages_answered", 0),
         ("tasks_completed", 0),
-        ("brother_chats", 0),
+        ("knowledge_captures", 0),
         ("heartbeats", 0),
         ("first_boot", int(datetime.now().timestamp())),
         ("last_daily_xp", 0),
@@ -227,7 +227,7 @@ def get_xp_rules() -> list[tuple[str, int, str]]:
         ("Answer a message", XP_MESSAGE, "Every reply to user"),
         ("Use a tool", XP_TOOL_USE, "Per tool used in a response"),
         ("Complete a task", XP_TASK, "Cron/pending task done"),
-        ("Brother chat", XP_BROTHER_CHAT, "Mail/group with sibling bot"),
+        ("Capture knowledge", XP_KNOWLEDGE_CAPTURE, "Saved memo or vault note"),
         ("Heartbeat", XP_HEARTBEAT, "Every 4h reflection"),
         ("Day survived", XP_DAY_ALIVE, "Once per calendar day"),
     ]
@@ -254,7 +254,7 @@ def get_stats_summary() -> dict:
         "max_level": prog["max_level"],
         "messages": get_stat("messages_answered"),
         "tasks": get_stat("tasks_completed"),
-        "brother_chats": get_stat("brother_chats"),
+        "knowledge_captures": get_stat("knowledge_captures"),
         "heartbeats": get_stat("heartbeats"),
         "days_alive": get_days_alive(),
     }
@@ -293,10 +293,10 @@ def on_task_completed():
     add_xp(XP_TASK, "task")
 
 
-def on_brother_chat():
-    """Call when interacting with brother."""
-    increment_stat("brother_chats")
-    add_xp(XP_BROTHER_CHAT, "brother")
+def on_knowledge_capture():
+    """Call when the bot captures a useful memo or vault note."""
+    increment_stat("knowledge_captures")
+    add_xp(XP_KNOWLEDGE_CAPTURE, "knowledge")
 
 
 def on_tool_use(count: int = 1):

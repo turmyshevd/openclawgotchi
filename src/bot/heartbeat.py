@@ -1,13 +1,11 @@
 """
-Heartbeat — periodic tasks, auto-mood, XP, bot_mail, reflection.
+Heartbeat — periodic tasks, auto-mood, XP, reflection.
 """
 
 import logging
 import os
 import re
-import sqlite3
 from pathlib import Path
-from typing import Optional
 
 from config import WORKSPACE_DIR, GROUP_CHAT_ID, get_admin_id, PROJECT_DIR, OWNER_NAME
 from db.memory import get_history, get_pending_tasks, delete_pending_task, save_message
@@ -21,11 +19,9 @@ from hooks.runner import run_hook, HookEvent
 
 log = logging.getLogger(__name__)
 
-# Bot mail config
 DB_PATH = PROJECT_DIR / "gotchi.db"
 # Bot identity — read from env, defaults to generic
 MY_NAME = os.environ.get("BOT_NAME", "gotchi").lower().replace(" ", "-")
-SIBLING_BOT = os.environ.get("SIBLING_BOT_NAME", "")  # Optional sibling for mail
 
 
 def _sanitize_reflection_text(text: str) -> str:
@@ -42,7 +38,7 @@ def _sanitize_reflection_text(text: str) -> str:
             continue
         if lower.startswith("**system") or lower.startswith("system:"):
             continue
-        if lower.startswith("**рефлек") or lower.startswith("рефлек"):
+        if lower.startswith("**reflection") or lower.startswith("reflection"):
             continue
         if stripped.startswith("---"):
             continue
@@ -55,105 +51,6 @@ def _get_heartbeat_target_chat_id() -> int:
     if GROUP_CHAT_ID:
         return GROUP_CHAT_ID
     return get_admin_id() or 0
-
-
-def get_unread_mail() -> list[dict]:
-    """Get unread mail for this bot from brother."""
-    if not DB_PATH.exists():
-        return []
-    
-    try:
-        conn = sqlite3.connect(str(DB_PATH))
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT id, from_bot, message, timestamp FROM bot_mail WHERE to_bot=? AND read_at IS NULL ORDER BY id ASC",
-            (MY_NAME,)
-        )
-        rows = cursor.fetchall()
-        
-        if rows:
-            ids = [r[0] for r in rows]
-            placeholders = ",".join("?" * len(ids))
-            conn.execute(f"UPDATE bot_mail SET read_at=CURRENT_TIMESTAMP WHERE id IN ({placeholders})", ids)
-            conn.commit()
-        
-        conn.close()
-        return [{"id": r[0], "from": r[1], "message": r[2], "timestamp": r[3]} for r in rows]
-        
-    except Exception as e:
-        log.error(f"Failed to check bot_mail: {e}")
-        return []
-
-
-def send_mail(to_bot: str, message: str) -> bool:
-    """Send mail to another bot (sibling bot)."""
-    try:
-        conn = sqlite3.connect(str(DB_PATH))
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO bot_mail (from_bot, to_bot, message, sender) VALUES (?, ?, ?, ?)",
-            (MY_NAME, to_bot, message, MY_NAME)
-        )
-        conn.commit()
-        conn.close()
-        log.info(f"Sent mail to {to_bot}")
-        return True
-    except Exception as e:
-        log.error(f"Failed to send mail: {e}")
-        return False
-
-
-def process_command_mail(message: str) -> Optional[str]:
-    """
-    Process command mails from brother.
-    Format: CMD:<command> [args]
-    Returns response message or None if not a command.
-    """
-    if not message.startswith("CMD:"):
-        return None
-    
-    cmd = message[4:].strip().upper()
-    router = get_router()
-    
-    if cmd == "PRO":
-        if not router.force_lite:
-            return "Already in Pro mode 🧠"
-        router.force_lite = False
-        log.info("Remote command: switched to Pro mode")
-        return "Switched to Pro mode! 🧠 Heavy thinking enabled."
-    
-    elif cmd == "LITE":
-        if router.force_lite:
-            return "Already in Lite mode ⚡"
-        router.force_lite = True
-        log.info("Remote command: switched to Lite mode")
-        return "Switched to Lite mode! ⚡ Fast & free."
-    
-    elif cmd == "STATUS":
-        stats = get_stats_summary()
-        mood, _ = get_auto_mood()
-        mode = "Lite" if router.force_lite else "Pro"
-        return (
-            f"Status Report:\n"
-            f"Level {stats['level']} {stats['title']} ({stats['xp']} XP)\n"
-            f"Mode: {mode}\n"
-            f"Mood: {mood}\n"
-            f"Messages: {stats['messages']} | Days: {stats['days_alive']}"
-        )
-    
-    elif cmd == "PING":
-        return "PONG! 🏓 I'm alive, brother!"
-    
-    elif cmd.startswith("FACE:"):
-        face = cmd[5:].strip().lower()
-        try:
-            from hardware.display import show_face
-            show_face(face, "From brother")
-            return f"Face set to: {face}"
-        except Exception as e:
-            return f"Failed to set face: {e}"
-    
-    return f"Unknown command: {cmd}. Try: PRO, LITE, STATUS, PING, FACE:<mood>"
 
 
 async def process_pending_tasks(context):
@@ -204,10 +101,6 @@ async def process_pending_tasks(context):
                     add_fact(cmds["remember"], "auto_memory")
                 except Exception:
                     pass
-            
-            # Execute mail command
-            if cmds.get("mail") and SIBLING_BOT:
-                send_mail(SIBLING_BOT, cmds["mail"])
             
             # Save response to history
             save_message(chat_id, "assistant", response)
@@ -290,41 +183,6 @@ async def send_heartbeat(context):
             log.info(f"Crystallized {crystallized_count} knowledge insights")
     except Exception as e:
         log.warning(f"Knowledge crystallization failed: {e}")
-    
-    # 5. Check for mail from brother
-    unread_mail = get_unread_mail()
-    mail_section = ""
-    command_responses = []
-    
-    if unread_mail:
-        from db.stats import on_brother_chat
-        on_brother_chat()
-        log.info(f"Got {len(unread_mail)} new mail(s) from brother!")
-        
-        for m in unread_mail:
-            # Check if it's a command
-            cmd_response = process_command_mail(m['message'])
-            if cmd_response:
-                command_responses.append(cmd_response)
-                if SIBLING_BOT:
-                    send_mail(SIBLING_BOT, cmd_response)
-            else:
-                # Regular mail - add to prompt
-                mail_section += f"- From {m['from']}: {m['message']}\n"
-    
-    # Get recent mail history for context
-    try:
-        conn = sqlite3.connect(str(DB_PATH))
-        cursor = conn.cursor()
-        cursor.execute("SELECT from_bot, message FROM bot_mail ORDER BY id DESC LIMIT 5")
-        history_rows = cursor.fetchall()
-        conn.close()
-        
-        history_section = "\n## Recent Mail History\n"
-        for h_from, h_msg in reversed(history_rows):
-            history_section += f"- {h_from}: {h_msg[:100]}...\n"
-    except Exception:
-        history_section = ""
     
     # 5. Load heartbeat template
     hb_path = WORKSPACE_DIR / "HEARTBEAT.md"
@@ -435,12 +293,6 @@ async def send_heartbeat(context):
             prompt += f"- \"{s}\"\n"
         prompt += "\nThink about something DIFFERENT this time.\n"
 
-    # Mail from brother (something to think/feel about)
-    if mail_section:
-        prompt += f"\n\n## Brother wrote to me\n{mail_section}"
-    if history_section:
-        prompt += history_section
-
     prompt += "\n\n[Reflect. Think out loud. Then FACE: and SAY:]"
     
     # 7. Call LLM
@@ -461,8 +313,8 @@ async def send_heartbeat(context):
     
     try:
         if response is None:
-            async with router.lock:
-                response, connector = await router.call(prompt, [])
+            # router.call() already acquires the Claude lock in Pro mode.
+            response, connector = await router.call(prompt, [])
         
         log.info(f"Heartbeat [{connector}]: {response[:100]}")
         
@@ -470,7 +322,7 @@ async def send_heartbeat(context):
         reflection_text = _sanitize_reflection_text(clean_text)
         if not reflection_text:
             # Fallback to a minimal reflection so heartbeat always speaks
-            reflection_text = "Тихие часы. Я здесь и продолжаю думать."
+            reflection_text = "Quiet hours. I'm here and still thinking."
         
         # Save reflection to daily log (always, even if no commands)
         if reflection_text:
@@ -479,10 +331,6 @@ async def send_heartbeat(context):
                 write_to_daily_log(f"[Heartbeat Reflection] {reflection_text[:300]}")
             except Exception as e:
                 log.warning(f"Failed to save reflection: {e}")
-        
-        # Handle MAIL: reply to sibling bot
-        if commands.get("mail") and SIBLING_BOT:
-            send_mail(SIBLING_BOT, commands["mail"])
         
         # Send group message
         if commands.get("group"):
@@ -536,7 +384,7 @@ async def send_heartbeat(context):
         try:
             target_chat_id = _get_heartbeat_target_chat_id()
             if target_chat_id:
-                await send_message(context.bot, target_chat_id, "Тихо. Я здесь и продолжаю думать.")
+                await send_message(context.bot, target_chat_id, "Quiet here. I'm still thinking.")
         except Exception:
             pass
         run_hook(HookEvent(event_type="heartbeat", action="error", text=str(e)))

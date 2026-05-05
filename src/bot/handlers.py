@@ -22,17 +22,17 @@ from bot.telegram import is_allowed, get_sender_name, send_long_message
 from bot.onboarding import needs_onboarding, get_bootstrap_prompt, check_onboarding_complete, complete_onboarding
 from hooks.runner import run_hook, HookEvent
 from memory.flush import check_and_inject_flush, write_to_daily_log
+from memory.vault import classify_message_for_vault, get_vault_stats
 from memory.summarize import optimize_history
 from cron.scheduler import add_cron_job, list_cron_jobs, remove_cron_job
 from skills.loader import get_eligible_skills
 from config import LLM_PRESETS
+from llm.prompts import build_system_context, build_vault_context
 
 log = logging.getLogger(__name__)
 
 # Patterns that signal the user is unhappy with the bot's response
 _NEGATIVE_PATTERNS = (
-    "не то", "не так", "неправильно", "не работает", "переделай",
-    "попробуй снова", "опять не так", "снова не то", "всё неправильно",
     "wrong", "not right", "doesn't work", "try again", "that's wrong",
     "incorrect", "not what i", "no no", "nope",
 )
@@ -43,9 +43,42 @@ def _is_negative_feedback(text: str) -> bool:
     t = text.lower().strip()
     words = t.split()
     # Short one-word negatives
-    if len(words) == 1 and words[0] in ("нет", "no", "нет.", "no.", "неправильно", "wrong"):
+    if len(words) == 1 and words[0] in ("no", "no.", "wrong"):
         return True
     return any(p in t for p in _NEGATIVE_PATTERNS)
+
+
+def _should_enable_memo_mode(user_text: str, classification) -> bool:
+    """
+    Enable vault capture only when the classifier is confident or the message
+    looks like a substantial structured note.
+    This keeps casual chat from being silently turned into notes.
+    """
+    text = (user_text or "").strip()
+    if not text:
+        return False
+
+    if getattr(classification, "kind", "") != "memo":
+        return False
+
+    confidence = float(getattr(classification, "confidence", 0.0) or 0.0)
+    low = text.lower()
+
+    # Long structured fragments are plausible notes even without explicit "save this".
+    structured_note = (
+        "\n" in text
+        or text.startswith(("-", "*", "1.", "2.", "3."))
+        or "todo" in low
+        or "tl;dr" in low
+    )
+
+    if confidence >= 0.85:
+        return True
+
+    if confidence >= 0.70 and structured_note and len(text) >= 80:
+        return True
+
+    return False
 
 
 # --- Command Handlers ---
@@ -143,6 +176,7 @@ async def cmd_context(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"/clear — wipe all history (model sees nothing next time)\n"
         f"/context trim — keep last 3 messages\n"
         f"/context sum — summarize & save to memory"
+        f"\n/vault — knowledge vault status"
     )
     
     # Handle subcommands
@@ -383,6 +417,32 @@ async def cmd_recall(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg)
 
 
+async def cmd_vault(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show vault status."""
+    user = update.effective_user
+    chat = update.effective_chat
+
+    if not is_allowed(user.id, chat.id):
+        return
+
+    stats = get_vault_stats()
+    lines = [
+        "📚 *Knowledge Vault*",
+        "",
+        f"Path: `{stats['vault_dir']}`",
+        f"Notes: {stats['notes_count']}",
+        f"Inbox days: {stats['inbox_days']}",
+        "",
+        "Recent notes:",
+    ]
+    if stats["recent"]:
+        lines.extend(f"- `{path.name}`" for path in stats["recent"])
+    else:
+        lines.append("- none yet")
+
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+
 async def cmd_cron(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
     Handle /cron command — add a scheduled task.
@@ -561,13 +621,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     save_user(user.id, user.username or "", user.first_name or "", user.last_name or "")
     
-    # Show typing
-    await chat.send_action(ChatAction.TYPING)
-    
-    # Get history (excluding current message)
+    # Triage before deciding how to handle the message.
     history = get_history(conv_id)
     if history:
         history = history[:-1]
+    onboarding_mode = needs_onboarding()
+    classification = None
+    memo_mode = False
+    if not onboarding_mode:
+        classification = await classify_message_for_vault(user_text, history)
+        # Keep personality for small talk, but only switch into vault-capture mode
+        # when the user clearly intends to save a note or the classifier is highly confident.
+        memo_mode = _should_enable_memo_mode(user_text, classification)
+
+    # Show typing
+    await chat.send_action(ChatAction.TYPING)
     
     # Check if memory flush needed (use full history length, before optimization)
     flush_prompt = check_and_inject_flush(history)
@@ -575,8 +643,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Optimize history for context window
     history = optimize_history(history)
     
-    # Check for onboarding (first-run setup)
-    onboarding_mode = needs_onboarding()
     if onboarding_mode:
         bootstrap_prompt = get_bootstrap_prompt()
         user_text = bootstrap_prompt + " [USER]: " + user_text
@@ -590,11 +656,22 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from llm import litellm_connector
     litellm_connector.set_cron_target_chat_id(conv_id)
     router = get_router()
+    system_prompt = None
+    if memo_mode:
+        system_prompt = build_system_context(user_text) + "\n---\n" + build_vault_context() + "\n\n"
+        system_prompt += (
+            "## Memo Capture Directive\n"
+            "Treat this message as project knowledge unless it clearly becomes a command or question.\n"
+            "If enough context is available, use vault_write to capture the note in markdown.\n"
+            "If anything essential is unclear, ask one short clarifying question before writing.\n"
+            "Do not invent fixed categories. Use free-form project/topic/tags/links.\n"
+            "After capture, keep the reply brief and mention what was saved.\n"
+        )
     
     try:
         # lock handled internally by connector
         log.info(f"[{sender}] -> {user_text[:80]}")
-        response, connector = await router.call(user_text, history)
+        response, connector = await router.call(user_text, history, system_prompt=system_prompt)
         log.info(f"[{sender}] <- [{connector}] {response[:80]}")
         
         # Check for error response (e.g. from LiteLLM)
@@ -622,19 +699,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             add_fact(cmds["remember"], "auto_memory")
             log.info(f"Auto-remembered: {cmds['remember']}")
         
-        # Execute mail command (MAIL: in LLM response)
-        if cmds.get("mail"):
-            try:
-                from bot.heartbeat import send_mail
-                from config import SIBLING_BOT_NAME
-                if SIBLING_BOT_NAME:
-                    send_mail(SIBLING_BOT_NAME, cmds["mail"])
-                    log.info(f"Mail sent to {SIBLING_BOT_NAME}: {cmds['mail'][:50]}")
-                else:
-                    log.warning("MAIL: command but no SIBLING_BOT_NAME configured")
-            except Exception as e:
-                log.error(f"Failed to send mail: {e}")
-        
         # Save response
         save_message(conv_id, "assistant", response)
         
@@ -649,10 +713,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Action confirmations for parsed commands (not tools)
         cmd_notes = []
-        if cmds.get("mail"):
-            from config import SIBLING_BOT_NAME
-            if SIBLING_BOT_NAME:
-                cmd_notes.append(f"📨 mail → {SIBLING_BOT_NAME}: \"{cmds['mail'][:40]}\" ✓")
         if cmds.get("remember"):
             cmd_notes.append(f"🧠 remembered: \"{cmds['remember'][:40]}\"")
         if cmd_notes:
@@ -675,9 +735,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tool_match = re.search(r'Tool usage \((\d+)\):', tool_source)
         if tool_match:
             on_tool_use(int(tool_match.group(1)))
-        # Also count parsed commands (MAIL:, REMEMBER:) as tool-like actions
-        elif cmds.get("mail") or cmds.get("remember"):
-            on_tool_use(sum(1 for k in ("mail", "remember") if cmds.get(k)))
+        # Knowledge capture gets its own XP reward if the vault write was used.
+        if memo_mode and "saved vault note" in tool_source.lower():
+            from db.stats import on_knowledge_capture
+            on_knowledge_capture()
+        # Also count parsed commands (REMEMBER:) as tool-like actions
+        elif cmds.get("remember"):
+            on_tool_use(1)
             
     except RateLimitError:
         # Queue for later
@@ -762,7 +826,6 @@ async def cmd_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
     from db.stats import get_stats_summary
     from hardware.system import get_stats
     import sqlite3
-    from pathlib import Path
 
     stats = get_stats()
     gotchi_stats = get_stats_summary()
@@ -776,8 +839,6 @@ async def cmd_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg_count = cursor.fetchone()[0]
     cursor.execute("SELECT COUNT(*) FROM facts")
     fact_count = cursor.fetchone()[0]
-    cursor.execute("SELECT COUNT(*) FROM bot_mail")
-    mail_count = cursor.fetchone()[0]
     conn.close()
 
     # DB size
@@ -787,7 +848,6 @@ async def cmd_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📊 **Memory Dashboard**\n\n"
         f"**Messages:** {msg_count}\n"
         f"**Facts:** {fact_count}\n"
-        f"**Mail:** {mail_count}\n"
         f"**Database:** {db_size // 1024} KB\n\n"
         f"**System**\n"
         f"{stats.uptime} | {stats.temp}\n"

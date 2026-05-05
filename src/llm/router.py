@@ -60,7 +60,7 @@ class LLMRouter:
     
     @property
     def lock(self):
-        """Get Claude's lock for exclusive access."""
+        """Expose Claude's lock for busy checks only; don't wrap router.call() with it."""
         return self.claude.lock
 
 

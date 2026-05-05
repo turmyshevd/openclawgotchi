@@ -97,10 +97,55 @@ done
 echo "  ✅ Disabled user-level audio services"
 
 # ============================================
-# 5. ENSURE BOT SERVICE IS READY
+# 5. FIREWALL BASELINE (if ufw is available)
 # ============================================
 echo ""
-echo "[5/5] Ensuring bot service is enabled..."
+echo "[5/7] Configuring firewall baseline..."
+if command -v ufw >/dev/null 2>&1; then
+    sudo ufw default deny incoming >/dev/null 2>&1 || true
+    sudo ufw default allow outgoing >/dev/null 2>&1 || true
+    sudo ufw allow 22/tcp >/dev/null 2>&1 || true
+    sudo ufw --force enable >/dev/null 2>&1 || true
+    echo "  ✅ UFW enabled (allow 22/tcp, deny incoming by default)"
+else
+    echo "  ⚠️  ufw not installed, skipping firewall setup"
+fi
+
+# ============================================
+# 6. SSH HARDENING (safe baseline)
+# ============================================
+echo ""
+echo "[6/7] Applying SSH hardening baseline..."
+TARGET_USER="${SUDO_USER:-$USER}"
+TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
+if [ -n "$TARGET_HOME" ] && [ -f "$TARGET_HOME/.ssh/authorized_keys" ]; then
+    sudo mkdir -p /etc/ssh/sshd_config.d
+    sudo tee /etc/ssh/sshd_config.d/99-gotchi-hardening.conf > /dev/null <<EOF
+PermitRootLogin no
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+MaxAuthTries 3
+ClientAliveInterval 300
+ClientAliveCountMax 2
+X11Forwarding no
+EOF
+    if sudo sshd -t 2>/dev/null; then
+        sudo systemctl reload ssh 2>/dev/null || sudo systemctl reload sshd 2>/dev/null || true
+        echo "  ✅ SSH hardening applied (root login off, password auth off)"
+    else
+        echo "  ⚠️  sshd config test failed, removing hardening drop-in"
+        sudo rm -f /etc/ssh/sshd_config.d/99-gotchi-hardening.conf
+    fi
+else
+    echo "  ⚠️  No authorized_keys for ${TARGET_USER}, skipping SSH auth hardening"
+fi
+
+# ============================================
+# 7. ENSURE BOT SERVICE IS READY
+# ============================================
+echo ""
+echo "[7/7] Ensuring bot service is enabled..."
 sudo systemctl daemon-reload
 sudo systemctl enable gotchi-bot.service 2>/dev/null || true
 echo "  ✅ gotchi-bot.service enabled"
@@ -122,6 +167,8 @@ echo "  🛡️ Protection:"
 echo "     • Hardware watchdog: 15s (reboots on system freeze)"
 echo "     • Cron watchdog: 5min (restarts bot if crashed)"
 echo "     • Systemd: auto-restart on bot failure"
+echo "     • UFW: allow 22/tcp, deny incoming (if installed)"
+echo "     • SSH: root login off, password auth off (if keys are present)"
 echo ""
 echo "  ⚠️  Reboot required for hardware watchdog!"
 echo "     sudo reboot"

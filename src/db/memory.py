@@ -73,18 +73,6 @@ def init_db():
         )
     """)
     
-    # Bot mail (sibling-to-sibling messages)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS bot_mail (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            from_bot TEXT,
-            to_bot TEXT,
-            message TEXT,
-            timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
-            read_at TEXT
-        )
-    """)
-
     # Feedback events — negative signals from user (used in heartbeat)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS feedback_events (
@@ -96,20 +84,6 @@ def init_db():
             surfaced INTEGER DEFAULT 0
         )
     """)
-    # Migration: brother bot or scripts may expect "sender" column (alias for from_bot)
-    for table in ("bot_mail", "botmail"):
-        try:
-            cursor = conn.cursor()
-            cursor.execute(f"PRAGMA table_info({table})")
-            columns = [row[1] for row in cursor.fetchall()]
-            if columns and "sender" not in columns:
-                conn.execute(f"ALTER TABLE {table} ADD COLUMN sender TEXT")
-                if "from_bot" in columns:
-                    conn.execute(f"UPDATE {table} SET sender = from_bot WHERE sender IS NULL")
-                conn.commit()
-        except Exception:
-            pass
-    
     conn.commit()
     conn.close()
 

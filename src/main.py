@@ -30,7 +30,7 @@ from db.memory import init_db
 from hardware.display import boot_screen, online_screen, show_face
 from bot.handlers import (
     cmd_start, cmd_clear, cmd_context, cmd_status, cmd_xp, cmd_pro, cmd_use,
-    cmd_remember, cmd_recall, cmd_cron, cmd_memory, cmd_health, cmd_jobs,
+    cmd_remember, cmd_recall, cmd_vault, cmd_cron, cmd_memory, cmd_health, cmd_jobs,
     handle_message
 )
 from bot.heartbeat import send_heartbeat
@@ -76,7 +76,7 @@ async def run_cron_job(job):
         return
     
     bot = Bot(token=BOT_TOKEN)
-    fallback_text = f"⏰ Напоминание: {job.name}"
+    fallback_text = f"⏰ Reminder: {job.name}"
     
     async def send_to_owner(text: str):
         if internal_reminder:
@@ -218,14 +218,6 @@ def main():
         scheduler.start()
         log.info(f"Cron scheduler started ({len(scheduler.jobs)} jobs)")
         
-        # Process any pending command mail from sibling on startup
-        from bot.heartbeat import get_unread_mail, process_command_mail, send_mail, SIBLING_BOT
-        for mail in get_unread_mail():
-            cmd_response = process_command_mail(mail["message"])
-            if cmd_response and SIBLING_BOT:
-                send_mail(SIBLING_BOT, cmd_response)
-                log.info(f"Startup: processed command mail -> {cmd_response[:50]}")
-
         # Show online screen (Start sleeping)
         show_face(mood="sleeping", text="Online (Zzz...)")
         log.info("Bot is running...")
@@ -250,6 +242,7 @@ def main():
     app.add_handler(CommandHandler("switch", cmd_use))
     app.add_handler(CommandHandler("remember", cmd_remember))
     app.add_handler(CommandHandler("recall", cmd_recall))
+    app.add_handler(CommandHandler("vault", cmd_vault))
     app.add_handler(CommandHandler("cron", cmd_cron))
     app.add_handler(CommandHandler("jobs", cmd_jobs))
 

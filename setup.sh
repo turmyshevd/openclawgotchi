@@ -116,19 +116,19 @@ echo "  (This may take a few minutes on Pi Zero)"
 
 # Try with --break-system-packages first (newer pip), fall back to without
 pip3 install --quiet --break-system-packages \
-    python-telegram-bot \
+    "python-telegram-bot[job-queue]" \
     litellm \
     Pillow \
     RPi.GPIO \
     spidev \
     2>/dev/null || \
 pip3 install --quiet \
-    python-telegram-bot \
+    "python-telegram-bot[job-queue]" \
     litellm \
     Pillow \
     2>/dev/null || \
 pip3 install \
-    python-telegram-bot \
+    "python-telegram-bot[job-queue]" \
     litellm \
     Pillow
 

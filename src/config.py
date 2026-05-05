@@ -40,7 +40,7 @@ ENABLE_LITELLM_TOOLS = _env_flag("ENABLE_LITELLM_TOOLS", True)
 # --- Bot Identity (customizable via onboarding) ---
 BOT_NAME = os.environ.get("BOT_NAME", "Gotchi")
 OWNER_NAME = os.environ.get("OWNER_NAME", "Owner")
-SIBLING_BOT_NAME = os.environ.get("SIBLING_BOT_NAME", "")  # Optional: name of sibling bot for mail
+SIBLING_BOT_NAME = os.environ.get("SIBLING_BOT_NAME", "")  # Legacy sibling bot name; not used by the current flow
 # --- LLM Presets (Lite mode) ---
 # Default preset for LiteLLM when no key is set — "glm" (Z.ai) or "gemini"
 DEFAULT_LITE_PRESET = os.environ.get("DEFAULT_LITE_PRESET", "glm")

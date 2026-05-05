@@ -11,7 +11,7 @@ Table `gotchi_stats` in `gotchi.db`:
 - +10 message answered
 - +5 per tool used in a response
 - +25 task completed
-- +50 sibling chat
+- +50 knowledge capture
 - +5 heartbeat
 - +100 per day alive
 
@@ -22,16 +22,16 @@ Table `gotchi_stats` in `gotchi.db`:
 - **Interval:** Every 4 hours
 - **Template:** `.workspace/HEARTBEAT.md`
 - **Context:** Loads SOUL.md + IDENTITY.md for self-awareness
-- **Does:** auto-mood, XP award, conversation summarization, mail check, LLM reflection
-- **Output:** Reflection saved to `memory/YYYY-MM-DD.md`, optional DM/GROUP/MAIL
+- **Does:** auto-mood, XP award, conversation summarization, LLM reflection
+- **Output:** Reflection saved to `memory/YYYY-MM-DD.md`, optional DM/GROUP
 
 ## Memory
 
 **SQLite (gotchi.db):**
 - `messages` — chat history by chat_id
 - `facts` — long-term memory (FTS5 full-text search)
-- `bot_mail` — mail from/to siblings
 - `gotchi_stats` — XP, level, counters
+- `.workspace/knowledge/` — markdown vault for project knowledge
 
 **Files (.workspace/):**
 - `BOT_INSTRUCTIONS.md` — system prompt (loaded every request)
@@ -43,11 +43,6 @@ Table `gotchi_stats` in `gotchi.db`:
 - `MEMORY.md` — curated long-term memory
 - `memory/` — daily logs
 
-## Brotherhood Mail (optional)
-
-Table `bot_mail`: from_bot, to_bot, message, timestamp, read_at
-Commands: CMD:PRO, CMD:LITE, CMD:STATUS, CMD:PING, CMD:FACE:mood
-
 ## E-Ink Display (ui/gotchi_ui.py)
 
 Kaomoji faces. Default + custom from `data/custom_faces.json`.
@@ -55,9 +50,9 @@ Kaomoji faces. Default + custom from `data/custom_faces.json`.
 
 ## LLM Tools (llm/litellm_connector.py)
 
-execute_bash, read_file, write_file, list_directory, remember_fact, recall_facts, search_skills, read_skill, show_face, add_custom_face, check_mail, health_check, manage_service, schedule_task, safe_restart
+execute_bash, read_file, write_file, list_directory, remember_fact, recall_facts, search_skills, read_skill, show_face, add_custom_face, vault_write, vault_read, vault_list, vault_search, health_check, manage_service, schedule_task, safe_restart
 
 ## Context Loading (llm/prompts.py)
 
 Every request: BOT_INSTRUCTIONS.md + skills list + system status
-Lazy (by keywords): ARCHITECTURE.md, TOOLS.md, SOUL.md, IDENTITY.md
+Lazy (by keywords): ARCHITECTURE.md, TOOLS.md, SOUL.md, IDENTITY.md, VAULT.md

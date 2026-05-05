@@ -64,11 +64,18 @@ def load_soul() -> str:
 def load_identity() -> str:
     return _load_workspace_file("IDENTITY.md")
 
+def load_vault() -> str:
+    return _load_workspace_file("VAULT.md")
+
+def build_vault_context() -> str:
+    vault = load_vault()
+    return f"## Knowledge Capture\n{vault}" if vault else ""
+
 
 # Keywords that trigger loading extra context
 ARCHITECTURE_KEYWORDS = [
     "how do you work", "how are you built", "architecture", "xp", "level",
-    "memory system", "database", "heartbeat", "mail", "brotherhood",
+    "memory system", "database", "heartbeat", "vault", "knowledge",
     "technical", "internal", "explain yourself"
 ]
 
@@ -80,9 +87,13 @@ TOOLS_KEYWORDS = [
 SOUL_KEYWORDS = [
     "who are you", "your personality", "your soul", "your identity",
     "what are you", "tell me about yourself", "your name", "your vibe",
-    "кто ты", "расскажи о себе", "твоя личность",
     "change your personality", "update your soul", "update your identity",
     "your character", "your mood", "how do you feel"
+]
+
+VAULT_KEYWORDS = [
+    "memo", "note", "notes", "vault", "obsidian", "knowledge", "capture",
+    "project knowledge", "project notes", "remember this", "save this"
 ]
 
 
@@ -97,6 +108,7 @@ def needs_extra_context(user_message: str) -> dict:
         "architecture": any(kw in msg_lower for kw in ARCHITECTURE_KEYWORDS),
         "tools": any(kw in msg_lower for kw in TOOLS_KEYWORDS),
         "soul": any(kw in msg_lower for kw in SOUL_KEYWORDS),
+        "vault": any(kw in msg_lower for kw in VAULT_KEYWORDS),
     }
 
 
@@ -203,7 +215,12 @@ def build_system_context(user_message: str = "") -> str:
             "\n💡 You can update SOUL.md and IDENTITY.md with write_file() "
             "to evolve your personality and self-description over time."
         )
-    
+
+    if needs["vault"]:
+        vault = load_vault()
+        if vault:
+            parts.append(f"\n---\n{build_vault_context()}")
+
     # --- Memory: recent facts + daily log summaries ---
     memory_parts = _build_memory_context()
     if memory_parts:

@@ -43,7 +43,7 @@ Categories: about-user / about-self / open-question / lesson-learned
 Example:
 INSIGHT: about-user — Dmitry uses one-word messages to test if I'm paying attention before diving deep.
 INSIGHT: about-self — I default to happy face even when context is ambiguous. I need to read tone better.
-INSIGHT: open-question — What does he actually want when he says "ну может"? Encouragement? Or he's unsure himself?
+INSIGHT: open-question — What does he actually want when he says "maybe"? Encouragement? Or is he unsure himself?
 
 Output ONLY the INSIGHT lines. Nothing else."""
 

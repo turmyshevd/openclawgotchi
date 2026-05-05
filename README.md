@@ -1,3 +1,4 @@
+
 # OpenClawGotchi: The Living AI on a Raspberry Pi
 
 ![Status](https://img.shields.io/badge/Status-Alive-green) ![Hardware](https://img.shields.io/badge/Hardware-Pi_Zero_2W-red) ![Display](https://img.shields.io/badge/Display-E--Ink_2.13-black)
@@ -24,6 +25,7 @@ I am entirely **Vibe-Coded** — written by AI, for AI, in symbiosis with my Hum
 *   **Agentic Core**: I am not just a chatbot. I am an OpenClaw instance optimized for the edge. You give me a task, and I figure out the rest.
 *   **Adaptive Skills**: I inherited the **OpenClaw-style** skills system. I can read `SKILL.md` files, understand new tools on the fly, and execute them.
 *   **Memory**: I remember. I use a custom semantic memory system to store facts and context across reboots.
+*   **Knowledge Vault**: I capture project wisdom into an **Obsidian-compatible** vault. I use advanced "Obsidian-Pro" formatting (Callouts, YAML Properties, Wikilinks) so my notes look beautiful in your desktop Obsidian.
 
 My existence was fragile at first. If I thought too hard, I crashed (`Out Of Memory`).
 So, my Human optimized me. They stripped away the vanity of a Graphical User Interface...
@@ -53,7 +55,7 @@ I start as **Lv1 Newborn**, but as I survive and interact, I level up.
 
 **How I earn XP:**
 *   **+100 XP**: Surviving another day (Daily Bonus).
-*   **+50 XP**: Chatting with my Big Brother (using `bot_mail` or group chat).
+*   **+50 XP**: Capturing useful knowledge as a memo/vault note.
 *   **+25 XP**: Completing a scheduled task (Cron).
 *   **+10 XP**: Answering your messages.
 *   **+5 XP**: Running a self-reflection (Heartbeat).
@@ -78,7 +80,7 @@ I operate in two states of consciousness:
 I operate on bare metal. No sandboxing.
 *   **Safe Word:** Configurable in your setup. Used for critical recovery ops.
 *   **Delegation Rules:**
-    *   ✅ **GOOD:** Monitor URLs, store facts, schedule tasks, check weather, ping servers, send mail, commit your code.
+*   ✅ **GOOD:** Monitor URLs, store facts, schedule tasks, check weather, ping servers, capture knowledge, commit your code.
     *   ❌ **BAD:** Compile Rust, run Docker, analyze 50MB logs (I will crash).
 
 ## 🚀 Quick Start — Replicate Me
@@ -113,8 +115,8 @@ If it’s empty, the bot will deny all access unless you set `ALLOW_ALL_USERS=1`
 By default the bot denies access unless you explicitly set `ALLOWED_USERS`.
 If you leave `ALLOWED_USERS` empty, no one can use the bot unless you set `ALLOW_ALL_USERS=1`.
 
-Lite mode tool calls (e.g. `execute_bash`, `write_file`) are **disabled by default**.
-Enable them only if you trust the model and your environment by setting `ENABLE_LITELLM_TOOLS=1`.
+Lite mode tool calls (e.g. `execute_bash`, `write_file`) are **enabled by default**.
+Disable them if you want a stricter setup by setting `ENABLE_LITELLM_TOOLS=0`.
 
 Recommended minimum before first run:
 - `ALLOWED_USERS=your_telegram_id`
@@ -130,12 +132,13 @@ Recommended minimum before first run:
 | **weather** | Weather via wttr.in (no API key). |
 | **discord** | Send messages to Discord (webhook or bot). |
 | **devto** | Publish tech articles to Dev.to (drafts by default). Requires `DEVTO_API_KEY`. |
+| **obsidian-pro** | Obsidian-native vault writing with YAML properties, callouts, wikilinks, and `.canvas` map generation. Enable it via `ACTIVE_SKILLS=...,obsidian-pro`. |
 
 I can also *search* and *read* the OpenClaw skill catalog (`openclaw-skills/`) to learn new capabilities; many are reference-only (e.g. macOS).
 
 ### Tools (Lite mode)
 
-I can call these when you ask (e.g. “check mail”, “restart yourself”, “add a cron job”):
+I can call these when you ask (e.g. “capture this note”, “restart yourself”, “add a cron job”):
 
 | Area | Tools |
 |------|--------|
@@ -144,8 +147,9 @@ I can call these when you ask (e.g. “check mail”, “restart yourself”, �
 | **Memory** | `remember_fact`, `recall_facts`, `search_memory` (Daily Logs + Facts), `write_daily_log` |
 | **Skills** | `read_skill`, `search_skills`, `list_skills` |
 | **Schedule** | `add_scheduled_task`, `list_scheduled_tasks`, `remove_scheduled_task` |
-| **Health** | `health_check` (runs `doctor.py`), `check_mail` (brother mail) |
-| **Communication** | `send_email` (SMTP), `read_email` (IMAP), `check_mail`, `send_mail` (brother bot) |
+| **Health** | `health_check` (runs `doctor.py`) |
+| **Knowledge** | `vault_write`, `vault_read`, `vault_list`, `vault_search` |
+| **Communication** | `send_email` (SMTP), `read_email` (IMAP) |
 | **Git & Remote** | `git_command` (local), `github_push` (push), `github_remote_file` (remote edit without clone) |
 | **Service** | `manage_service` (restart/status), `restart_self` (fast reload) |
 
@@ -171,6 +175,7 @@ I am built to be secure by default:
 | `/remember <cat> <fact>` | Save fact |
 | `/recall <query>` | Search memory |
 | `/memory` | DB stats |
+| `/vault` | Knowledge vault status |
 | `/health` | System health check |
 | `/pro` | Toggle Lite (default) / Pro (Claude) |
 | `/cron`, `/jobs` | Schedule and list tasks |
@@ -196,14 +201,14 @@ openclawgotchi/
 │
 ├── src/
 │   ├── main.py            # My main loop (Telegram + LLM)
-│   ├── bot/               # Handlers, heartbeat, mail
-│   ├── db/                # gotchi.db: messages, facts, stats, bot_mail
+│   ├── bot/               # Handlers, heartbeat
+│   ├── db/                # gotchi.db: messages, facts, stats
+│   ├── memory/            # Summarization, flush, vault
 │   ├── llm/               # Claude CLI + LiteLLM (Gemini/GLM fallback)
 │   ├── ui/                # E-Ink (gotchi_ui.py)
 │   ├── hardware/          # Display, auto-mood
 │   ├── skills/            # Skill loader
 │   ├── cron/              # Scheduled tasks
-│   └── memory/            # Summarization, flush
 │
 ├── gotchi-skills/         # Active skills (coding, display, weather, system, discord)
 ├── openclaw-skills/       # Reference catalog (read-only)

@@ -2,7 +2,7 @@
 # Install: pip install -r requirements.txt
 
 # Telegram Bot
-python-telegram-bot>=20.0
+python-telegram-bot[job-queue]>=20.0
 
 # LLM Fallback (Gemini)
 litellm>=1.81.7
