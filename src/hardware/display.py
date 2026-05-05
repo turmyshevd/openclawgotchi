@@ -59,7 +59,7 @@ def update_display(mood: str = None, text: str = None, full_refresh: bool = Fals
     if not full_refresh and _display_update_count % FULL_REFRESH_EVERY == 0:
         full_refresh = True  # Force full redraw periodically to avoid stuck E-Ink
 
-    cmd = ["sudo", "python3", str(UI_SCRIPT)]
+    cmd = ["sudo", str(PROJECT_DIR / "venv/bin/python3"), str(UI_SCRIPT)]
     if mood:
         cmd.extend(["--mood", mood])
     if text:

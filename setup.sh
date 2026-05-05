@@ -111,26 +111,30 @@ fi
 # STEP 4: Install dependencies
 # ============================================
 echo ""
-echo "[4/5] Installing Python packages..."
+echo "[4/6] Installing system dependencies & Python packages..."
 echo "  (This may take a few minutes on Pi Zero)"
 
-# Try with --break-system-packages first (newer pip), fall back to without
-pip3 install --quiet --break-system-packages \
+# Install system fonts and GPIO tools
+sudo apt-get update -qq
+sudo apt-get install -y -qq fonts-unifont fonts-dejavu-core fonts-symbola python3-lgpio lsof 2>/dev/null
+
+# Add user to hardware groups
+sudo usermod -aG gpio,spi,i2c "${USER}" 2>/dev/null || true
+
+# Create venv with system-site-packages so it can see system lgpio
+if [ ! -d "${SCRIPT_DIR}/venv" ]; then
+    python3 -m venv --system-site-packages "${SCRIPT_DIR}/venv"
+fi
+
+# Install python packages in venv
+"${SCRIPT_DIR}/venv/bin/pip" install --quiet \
     "python-telegram-bot[job-queue]" \
     litellm \
     Pillow \
     RPi.GPIO \
     spidev \
-    2>/dev/null || \
-pip3 install --quiet \
-    "python-telegram-bot[job-queue]" \
-    litellm \
-    Pillow \
-    2>/dev/null || \
-pip3 install \
-    "python-telegram-bot[job-queue]" \
-    litellm \
-    Pillow
+    gpiozero \
+    2>/dev/null
 
 echo "  ✅ Dependencies installed"
 
@@ -144,7 +148,7 @@ fi
 # STEP 5: Create systemd service
 # ============================================
 echo ""
-echo "[5/5] Setting up systemd service..."
+echo "[5/6] Setting up systemd service..."
 
 sudo tee /etc/systemd/system/gotchi-bot.service > /dev/null <<EOF
 [Unit]
@@ -157,7 +161,7 @@ Type=simple
 User=${USER}
 WorkingDirectory=${SCRIPT_DIR}
 EnvironmentFile=${SCRIPT_DIR}/.env
-ExecStart=/usr/bin/python3 ${SCRIPT_DIR}/src/main.py
+ExecStart=${SCRIPT_DIR}/venv/bin/python3 ${SCRIPT_DIR}/src/main.py
 Restart=always
 RestartSec=10
 StandardOutput=journal
@@ -174,6 +178,19 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl enable gotchi-bot.service
 echo "  ✅ Service created and enabled"
+
+# ============================================
+# STEP 6: E-Ink Permissions (Passwordless sudo)
+# ============================================
+echo ""
+echo "[6/6] Configuring E-Ink permissions..."
+# Create a sudoers entry so the bot can run the UI script without a password
+SUDOERS_FILE="/etc/sudoers.d/gotchi-display"
+UI_SCRIPT_PATH="${SCRIPT_DIR}/src/ui/gotchi_ui.py"
+PYTHON_VENV_PATH="${SCRIPT_DIR}/venv/bin/python3"
+echo "${USER} ALL=(ALL) NOPASSWD: ${PYTHON_VENV_PATH} ${UI_SCRIPT_PATH}" | sudo tee "$SUDOERS_FILE" > /dev/null
+sudo chmod 0440 "$SUDOERS_FILE"
+echo "  ✅ Display permissions configured (passwordless sudo)"
 
 # ============================================
 # OPTIONAL: HARDENING (recommended for Pi Zero)

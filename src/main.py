@@ -212,6 +212,23 @@ def main():
 
     async def post_init(application: Application):
         """Async post-initialization hook."""
+        # Set command menu in Telegram
+        from telegram import BotCommand
+        commands = [
+            BotCommand("status", "System & XP stats"),
+            BotCommand("vault", "Knowledge vault status"),
+            BotCommand("context", "View/trim context window"),
+            BotCommand("mode", "Toggle Lite/Pro mode"),
+            BotCommand("xp", "XP rules & progress"),
+            BotCommand("remember", "Save fact: /remember cat fact"),
+            BotCommand("recall", "Search memory: /recall query"),
+            BotCommand("jobs", "List/remove scheduled tasks"),
+            BotCommand("clear", "Wipe conversation history"),
+            BotCommand("health", "System health check"),
+        ]
+        await application.bot.set_my_commands(commands)
+        log.info("Telegram command menu updated")
+
         # Start cron scheduler
         scheduler = get_scheduler()
         scheduler.on_job_run(run_cron_job)

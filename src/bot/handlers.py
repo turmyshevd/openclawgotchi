@@ -114,6 +114,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"/pro — switch to Pro mode\n"
         f"/lite — switch to Lite mode\n"
         f"/mode — toggle Lite/Pro mode\n"
+        f"/vault — knowledge vault status\n"
         f"/memory — database stats\n\n"
         f"*Memory:*\n"
         f"/remember <cat> <fact> — save fact\n"
