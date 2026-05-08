@@ -2,6 +2,13 @@
 
 All notable changes to the OpenClawGotchi project will be documented in this file.
 
+## [Unreleased] - 2026-05-09
+
+### Added
+- **`/update` Telegram command + `scripts/auto_update.sh`**: owner-only command that fetches `origin/main`, fast-forwards if there are new commits, refreshes venv deps when `requirements.txt` changed, and restarts the systemd service. Supports `/update check` for dry-run. Cron-friendly so the bot can also auto-update unattended.
+- **Update safety net**: before pulling, the script tarballs `gotchi.db` + `data/` + `.env` to `backups/pre-update-<timestamp>-<sha>.tar.gz` (rolling, keeps last 3 — see `OCG_BACKUP_KEEP`). If the service fails to come back up after the new code is in place, the script auto-rolls-back to the previous commit, reinstalls deps if needed, restarts, and exits with code 4 to flag the failed upgrade. Disable with `OCG_NO_BACKUP=1` / `OCG_NO_ROLLBACK=1`.
+- **`gotchi-update` sudoers entry** in `setup.sh`: lets the bot user `systemctl restart gotchi-bot.service` without a password — needed by `/update` and the unattended cron path.
+
 ## [Unreleased] - 2026-04-29
 
 ### Added
