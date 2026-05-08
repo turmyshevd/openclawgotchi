@@ -10,7 +10,7 @@ import base64
 import asyncio
 from pathlib import Path
 
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ChatAction
 from telegram.ext import ContextTypes
 
@@ -39,6 +39,7 @@ from config import (
     SYNCTHING_API_KEY,
     SYNCTHING_API_URL,
 )
+from config import OLLAMA_API_BASE
 from llm.prompts import build_system_context, build_vault_context
 
 log = logging.getLogger(__name__)
@@ -1148,10 +1149,9 @@ async def cmd_use(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "gemini" in model_key: emoji = "♊️"
     
     await update.message.reply_text(f"{emoji} Switched to *{model_key.upper()}*!\nModel: {preset['model']}", parse_mode="Markdown")
-    
+
     # Visual update
     show_face(mood="happy", text=f"Model: {model_key.upper()}")
-
 
 async def cmd_battery(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /battery command — show UPS HAT (C) status."""
@@ -1169,6 +1169,152 @@ async def cmd_battery(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await update.message.reply_text(reading.long())
+
+# --- /model command: inline-button picker with live Ollama discovery ---
+
+_MODEL_EMOJI = {"gemini": "♊️", "glm": "🇨🇳", "ollama": "🦙"}
+
+
+def _ollama_list_with_capabilities(timeout: float = 4.0) -> list[dict]:
+    """Fetch installed Ollama models + capabilities. Returns [{name, supports_tools}]."""
+    import requests
+    base = (OLLAMA_API_BASE or "").rstrip("/")
+    if not base:
+        return []
+    try:
+        r = requests.get(f"{base}/api/tags", timeout=timeout)
+        r.raise_for_status()
+        names = [m.get("name") for m in r.json().get("models", []) if m.get("name")]
+    except Exception as e:
+        log.warning(f"Ollama /api/tags failed: {e}")
+        return []
+
+    out = []
+    for name in names:
+        supports = False
+        try:
+            sr = requests.post(f"{base}/api/show", json={"model": name}, timeout=timeout)
+            if sr.ok:
+                caps = sr.json().get("capabilities") or []
+                supports = "tools" in caps
+        except Exception:
+            pass
+        out.append({"name": name, "supports_tools": supports})
+    return out
+
+
+def _top_model_markup(current: str) -> InlineKeyboardMarkup:
+    rows = []
+    for key in LLM_PRESETS.keys():
+        emoji = _MODEL_EMOJI.get(key, "🔹")
+        active = LLM_PRESETS[key]["model"] == current or (
+            key == "ollama" and isinstance(current, str) and current.startswith("ollama_chat/")
+        )
+        marker = " ✅" if active else ""
+        suffix = " ▸" if key == "ollama" else ""
+        rows.append([InlineKeyboardButton(f"{emoji} {key}{marker}{suffix}", callback_data=f"model:{key}")])
+    return InlineKeyboardMarkup(rows)
+
+
+async def cmd_model(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show inline buttons to switch LLM model. With argument acts like /use."""
+    if not is_allowed(update.effective_user.id, update.effective_chat.id):
+        return
+
+    if context.args:
+        return await cmd_use(update, context)
+
+    router = get_router()
+    current = router.litellm.model
+    text = f"🦄 *Current:* `{current}`\n\nPick a model:"
+    await update.message.reply_text(text, parse_mode="Markdown", reply_markup=_top_model_markup(current))
+
+
+async def cb_model(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Callback for /model inline buttons (presets + Ollama submenu)."""
+    import asyncio
+    query = update.callback_query
+    if not is_allowed(query.from_user.id, query.message.chat_id):
+        await query.answer("Not allowed", show_alert=True)
+        return
+    await query.answer()
+
+    data = query.data or ""
+    router = get_router()
+
+    # Specific Ollama model switch: omd:<name>
+    if data.startswith("omd:"):
+        model_name = data.split(":", 1)[1]
+        full = f"ollama_chat/{model_name}"
+        router.litellm.set_model(full, OLLAMA_API_BASE)
+        router.force_lite = True
+        await query.edit_message_text(
+            f"🦙 Switched to *Ollama / {model_name}*\n`{full}`",
+            parse_mode="Markdown"
+        )
+        show_face(mood="happy", text=f"Ollama: {model_name[:20]}")
+        return
+
+    key = data.split(":", 1)[-1]
+
+    # Back to top menu
+    if key == "back":
+        await query.edit_message_text(
+            f"🦄 *Current:* `{router.litellm.model}`\n\nPick a model:",
+            parse_mode="Markdown",
+            reply_markup=_top_model_markup(router.litellm.model)
+        )
+        return
+
+    # Ollama: fetch and show submenu (only tool-capable models)
+    if key == "ollama":
+        await query.edit_message_text("🦙 Fetching models from Ollama server…")
+        models = await asyncio.to_thread(_ollama_list_with_capabilities)
+
+        if not models:
+            await query.edit_message_text(
+                f"❌ Could not reach Ollama at `{OLLAMA_API_BASE}`",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◂ Back", callback_data="model:back")]])
+            )
+            return
+
+        tool_models = [m for m in models if m["supports_tools"]]
+        show_models = tool_models if tool_models else models
+        note = "" if tool_models else "\n⚠️ _No tool-capable models found, showing all_"
+
+        rows = []
+        for m in show_models:
+            name = m["name"]
+            cb = f"omd:{name}"
+            if len(cb.encode("utf-8")) > 60:
+                continue  # Telegram callback_data limit (64 bytes)
+            tag = "🔧" if m["supports_tools"] else "🔸"
+            rows.append([InlineKeyboardButton(f"{tag} {name}", callback_data=cb)])
+        rows.append([InlineKeyboardButton("◂ Back", callback_data="model:back")])
+
+        await query.edit_message_text(
+            f"🦙 *Ollama models* ({len(show_models)}){note}\n\n🔧 = supports tools",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(rows)
+        )
+        return
+
+    # Static presets (gemini, glm)
+    if key not in LLM_PRESETS:
+        await query.edit_message_text("❌ Unknown model.")
+        return
+
+    preset = LLM_PRESETS[key]
+    router.litellm.set_model(preset["model"], preset["api_base"])
+    router.force_lite = True
+
+    emoji = _MODEL_EMOJI.get(key, "🔹")
+    await query.edit_message_text(
+        f"{emoji} Switched to *{key.upper()}*\n`{preset['model']}`",
+        parse_mode="Markdown"
+    )
+    show_face(mood="happy", text=f"Model: {key.upper()}")
 
 
 async def cmd_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
