@@ -1245,25 +1245,63 @@ def _build_tool_footer(actions: list[str]) -> str:
 # CONNECTOR
 # ============================================================
 
+_ACTIVE_MODEL_FILE = None  # Set lazily to avoid circular import
+
+
+def _active_model_path() -> Path:
+    global _ACTIVE_MODEL_FILE
+    if _ACTIVE_MODEL_FILE is None:
+        from config import DATA_DIR
+        _ACTIVE_MODEL_FILE = DATA_DIR / "active_model.json"
+    return _ACTIVE_MODEL_FILE
+
+
+def _load_active_model() -> Optional[dict]:
+    try:
+        p = _active_model_path()
+        if p.exists():
+            return json.loads(p.read_text())
+    except Exception as e:
+        log.warning(f"Could not load active_model.json: {e}")
+    return None
+
+
+def _save_active_model(model: str, api_base: Optional[str]) -> None:
+    try:
+        p = _active_model_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({"model": model, "api_base": api_base}, indent=2))
+    except Exception as e:
+        log.warning(f"Could not save active_model.json: {e}")
+
+
 class LiteLLMConnector(LLMConnector):
     """LiteLLM connector with tools."""
-    
+
     name = "litellm"
-    
+
     def __init__(self, model: str = None, api_base: str = None):
         from config import DEFAULT_LITE_PRESET, LLM_PRESETS, GEMINI_API_BASE
         if model is not None:
             self.model = model
             self.api_base = api_base
         else:
-            preset = LLM_PRESETS.get(DEFAULT_LITE_PRESET, LLM_PRESETS["glm"])
-            self.model = preset["model"]
-            self.api_base = preset.get("api_base") or GEMINI_API_BASE or None
+            # Persisted choice from /model (survives restart) takes priority
+            saved = _load_active_model()
+            if saved and saved.get("model"):
+                self.model = saved["model"]
+                self.api_base = saved.get("api_base")
+                log.info(f"[LiteLLM] Restored active model: {self.model}")
+            else:
+                preset = LLM_PRESETS.get(DEFAULT_LITE_PRESET, LLM_PRESETS["glm"])
+                self.model = preset["model"]
+                self.api_base = preset.get("api_base") or GEMINI_API_BASE or None
 
     def set_model(self, model: str, api_base: str = None):
-        """Dynamically switch model and api_base."""
+        """Dynamically switch model and api_base. Persists across restarts."""
         self.model = model
         self.api_base = api_base
+        _save_active_model(model, api_base)
     
     def is_available(self) -> bool:
         return LITELLM_AVAILABLE
