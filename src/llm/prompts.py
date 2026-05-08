@@ -7,7 +7,30 @@ Both Claude CLI and LiteLLM use the same files.
 
 from pathlib import Path
 
-from config import PROJECT_DIR, WORKSPACE_DIR, CUSTOM_FACES_PATH
+from config import PROJECT_DIR, WORKSPACE_DIR, CUSTOM_FACES_PATH, BOT_LANGUAGE
+
+
+_LANG_NAMES = {
+    "de": "German (Deutsch)", "en": "English", "ru": "Russian (Русский)",
+    "es": "Spanish (Español)", "fr": "French (Français)", "it": "Italian (Italiano)",
+    "pt": "Portuguese", "nl": "Dutch", "pl": "Polish", "tr": "Turkish",
+    "ja": "Japanese", "zh": "Chinese", "ko": "Korean",
+}
+
+
+def _language_directive() -> str:
+    """Build a strong language instruction from BOT_LANGUAGE."""
+    code = (BOT_LANGUAGE or "").strip().lower()
+    if not code:
+        return ""
+    name = _LANG_NAMES.get(code, code)
+    return (
+        f"\n---\n## Language\n"
+        f"ALWAYS respond in **{name}** by default — including the SAY: speech bubble "
+        f"and any autonomous output (heartbeat, reflections, status). "
+        f"Only switch language if the user clearly writes to you in another language; "
+        f"in that case, mirror their language. Never use a third language."
+    )
 from hardware.system import get_stats_string
 import json
 
@@ -180,7 +203,12 @@ def build_system_context(user_message: str = "") -> str:
     ALWAYS includes skills (if available).
     """
     parts = [load_bot_instructions()]
-    
+
+    # Pin response language (BOT_LANGUAGE) — applies to heartbeat, SAY: bubble, replies
+    lang = _language_directive()
+    if lang:
+        parts.append(lang)
+
     # Add custom faces list if any
     custom_faces = _load_custom_faces_list()
     if custom_faces:
