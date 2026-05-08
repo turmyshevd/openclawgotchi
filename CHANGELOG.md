@@ -2,6 +2,16 @@
 
 All notable changes to the OpenClawGotchi project will be documented in this file.
 
+## [Unreleased] - 2026-05-09
+
+### Added
+- **`/model` Telegram command**: inline-keyboard model picker. Without args it opens buttons for every preset (gemini, glm, ollama). With an argument (`/model glm`) it falls through to the existing `/use` flow. `/use` and `/switch` remain as text aliases.
+- **Live Ollama discovery**: tapping `🦙 ollama ▸` queries the configured Ollama server (`/api/tags` + `/api/show`), filters by `capabilities.tools`, and only lists tool-capable models. Falls back to all installed models with a warning when none advertise tools. Includes `◂ Back` button and a graceful "could not reach server" state. New env vars: `OLLAMA_MODEL` (default `qwen2.5:14b`) and `OLLAMA_API_BASE` (placeholder default `http://ollama-server:11434`).
+- **Persistent model choice**: `/model` and `/use` now write the selection to `data/active_model.json` (gitignored). On startup `LiteLLMConnector` restores it before falling back to `DEFAULT_LITE_PRESET`. Survives `systemctl restart` and reboots.
+
+### Changed
+- **HTTP timeouts** raised via `Application.builder()` (`read=60`, `write=60`, `connect=30`, `pool=30`). Pi Zero 2W's WiFi can otherwise time out polling Telegram while a long Ollama reply is streaming, surfacing as `httpx.ReadError` / `Timed out`.
+
 ## [Unreleased] - 2026-04-29
 
 ### Added
