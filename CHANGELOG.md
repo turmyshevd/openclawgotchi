@@ -2,6 +2,14 @@
 
 All notable changes to the OpenClawGotchi project will be documented in this file.
 
+## [Unreleased] - 2026-05-09
+
+### Added
+- **UPS HAT (C) battery monitoring** (Waveshare): new `hardware/battery.py` reads bus voltage, current and power from the on-board INA219 over I2C and reports a 0–100 % estimate based on the 2× 18650 voltage curve (6.0 V empty → 8.4 V full). Auto-detects the sensor and gracefully degrades when I2C is disabled or the HAT is absent — every public function returns `None` rather than raising.
+- **`/battery` Telegram command**: shows the current reading (`🔋 87 % — 8.12 V, +120 mA (charging, 974 mW)`) or a friendly "no UPS HAT detected" hint with `i2cdetect` instructions.
+- **System status line includes battery** (when present): `get_stats_string()` adds a `[BATTERY] …` line, so heartbeat reflections and the bot's self-awareness pick up battery state automatically.
+- **Optional dep `smbus2`** added to `requirements.txt` (pure-Python, ~30 KB). Drop the line to disable battery support entirely.
+
 ## [Unreleased] - 2026-04-29
 
 ### Added
