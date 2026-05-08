@@ -34,6 +34,8 @@ HISTORY_LIMIT = int(os.environ.get("HISTORY_LIMIT", "10"))
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini/gemini-1.5-flash")
 GEMINI_API_BASE = os.environ.get("GEMINI_API_BASE", "")  # Optional override for Z.ai/OpenAI
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:14b")
+OLLAMA_API_BASE = os.environ.get("OLLAMA_API_BASE", "http://ollama-server:11434")
 BOT_LANGUAGE = os.environ.get("BOT_LANGUAGE", "en")  # Default response language
 GROUP_CHAT_ID = int(os.environ.get("GROUP_CHAT_ID", "0"))  # Optional group for heartbeat
 ENABLE_LITELLM_TOOLS = _env_flag("ENABLE_LITELLM_TOOLS", True)
@@ -54,6 +56,10 @@ LLM_PRESETS = {
     "glm": {
         "model": "anthropic/glm-5.1",
         "api_base": "https://api.z.ai/api/anthropic"
+    },
+    "ollama": {
+        "model": f"ollama_chat/{OLLAMA_MODEL}",
+        "api_base": OLLAMA_API_BASE
     }
 }
 
