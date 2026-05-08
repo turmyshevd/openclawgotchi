@@ -2,6 +2,16 @@
 
 All notable changes to the OpenClawGotchi project will be documented in this file.
 
+## [Unreleased] - 2026-05-09
+
+### Added
+- **Auto-detect display variant**: optional support for the Waveshare 2.13in V4 **B-variant** (3-color, black/red/white) panel alongside the existing mono panel. Pick via env var `OCG_DISPLAY_VARIANT={mono,b,auto}`; default stays `mono` so existing installs are unchanged. Ships the Waveshare reference driver `src/drivers/epd2in13b_V4.py` (MIT) next to the existing mono one.
+- **Variant-aware display timings**: `hardware/display.py` retry-wait, refresh interval, and timeouts scale to variant. The B panel takes ~15-20 s per full refresh, so retry jumps from 4 s → 20 s, debounce becomes 30 s, and the subprocess timeout becomes 120 s — only on B; mono behaviour is unchanged.
+- **Dedup**: `update_display()` skips when `(mood, text)` matches the previous payload (was already logged but never gated). Saves a refresh cycle on E-Ink which has a limited write budget.
+
+### Fixed
+- **`sudo` dropped env vars when spawning the UI subprocess**: `_run_display_update` now invokes `sudo /usr/bin/env VAR=val ...` so `OCG_DISPLAY_VARIANT`, `GPIOZERO_PIN_FACTORY` and the optional `OCG_UPS_*` reach the UI script. Without this the subprocess fell back to defaults (mono driver, rpigpio backend) which on a B-variant panel + modern kernel rendered colors inverted.
+
 ## [Unreleased] - 2026-04-29
 
 ### Added

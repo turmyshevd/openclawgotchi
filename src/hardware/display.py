@@ -11,18 +11,34 @@ import re
 import threading
 import time
 
+import os
+
 from config import UI_SCRIPT, PROJECT_DIR
 
 log = logging.getLogger(__name__)
 
-# E-Ink ghosting: every N-th update do full refresh so the panel actually redraws
+# Display variant — needs different timing.
+#   mono (epd2in13_V4)   : ~2 s per refresh, supports partial — short retry OK
+#   B    (epd2in13b_V4)  : ~15 s per refresh, full refresh only — much longer retry needed
+_DISPLAY_VARIANT = os.environ.get("OCG_DISPLAY_VARIANT", "mono").strip().lower()
+_VARIANT_B = _DISPLAY_VARIANT in ("b", "epd2in13b", "3color", "tricolor", "auto")
+
+# E-Ink ghosting: every N-th update do full refresh so the panel actually redraws.
+# Only relevant for the mono variant — the B variant always does a full refresh.
 _display_update_count = 0
 FULL_REFRESH_EVERY = 3
 
+# Dedup + debounce — skip updates that are identical to the last one or arrive
+# too quickly. Especially valuable on the B variant where every refresh is full.
+_MIN_UPDATE_INTERVAL = 30 if _VARIANT_B else 0   # seconds between non-forced updates
+_last_update_ts = 0.0
+_last_payload = (None, None)  # (mood, text)
+
 # Only one UI script at a time — avoids "GPIO busy" from overlapping runs
 _display_lock = threading.Lock()
-_DISPLAY_TIMEOUT = 45  # seconds
-_DISPLAY_BUSY_RETRY_WAIT = 4  # seconds before retry when display was busy
+# B variant: full refresh ~15-20 s + boot/font overhead can push the first render over a minute.
+_DISPLAY_TIMEOUT = 120 if _VARIANT_B else 45  # seconds
+_DISPLAY_BUSY_RETRY_WAIT = 20 if _VARIANT_B else 4  # seconds before retry when display was busy
 
 
 def _run_display_update(cmd: list):
@@ -51,15 +67,50 @@ def _run_display_update(cmd: list):
 
 def update_display(mood: str = None, text: str = None, full_refresh: bool = False):
     """Update display with mood and/or text in a single call."""
-    global _display_update_count
+    global _display_update_count, _last_update_ts, _last_payload
     if not mood and not text:
         return
 
-    _display_update_count += 1
-    if not full_refresh and _display_update_count % FULL_REFRESH_EVERY == 0:
-        full_refresh = True  # Force full redraw periodically to avoid stuck E-Ink
+    payload = (mood, text)
+    now = time.monotonic()
 
-    cmd = ["sudo", str(PROJECT_DIR / "venv/bin/python3"), str(UI_SCRIPT)]
+    # Dedup — skip identical consecutive updates (e.g. heartbeat re-emitting
+    # the same face/text). Saves a refresh cycle on E-Ink which is finite.
+    if payload == _last_payload and not full_refresh:
+        log.debug(f"Display: same payload, skip ({mood}/{text})")
+        return
+
+    # Debounce on the B variant only (mono is fast enough to update at will).
+    # _MIN_UPDATE_INTERVAL == 0 disables the gate.
+    if (_MIN_UPDATE_INTERVAL > 0
+            and not full_refresh
+            and (now - _last_update_ts) < _MIN_UPDATE_INTERVAL):
+        log.debug(f"Display: debounced ({now - _last_update_ts:.1f}s < {_MIN_UPDATE_INTERVAL}s)")
+        return
+
+    _last_update_ts = now
+    _last_payload = payload
+
+    # Anti-ghosting: every N-th update force a full redraw on the mono variant.
+    # The B variant always does a full refresh anyway, so this branch is a no-op there.
+    if not _VARIANT_B:
+        _display_update_count += 1
+        if not full_refresh and _display_update_count % FULL_REFRESH_EVERY == 0:
+            full_refresh = True
+
+    # `sudo` strips most environment variables (env_reset Defaults). Propagate
+    # the display-related ones via /usr/bin/env so the spawned UI script sees
+    # the correct driver variant (OCG_DISPLAY_VARIANT) and GPIO backend
+    # (GPIOZERO_PIN_FACTORY). Without this the subprocess falls back to
+    # defaults (mono driver, rpigpio backend) which on a B-variant panel +
+    # modern kernel renders inverted colors.
+    propagate_env = {
+        k: v for k, v in os.environ.items()
+        if k in ("OCG_DISPLAY_VARIANT", "GPIOZERO_PIN_FACTORY", "OCG_UPS_BUS", "OCG_UPS_ADDR")
+    }
+    cmd = ["sudo", "/usr/bin/env"]
+    cmd.extend(f"{k}={v}" for k, v in propagate_env.items())
+    cmd.extend([str(PROJECT_DIR / "venv/bin/python3"), str(UI_SCRIPT)])
     if mood:
         cmd.extend(["--mood", mood])
     if text:
