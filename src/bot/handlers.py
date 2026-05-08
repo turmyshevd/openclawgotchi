@@ -1098,6 +1098,26 @@ async def cmd_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.edit_text(f"❌ Update error: `{e}`", parse_mode="Markdown")
 
 
+async def cmd_battery(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /battery command — show UPS HAT (C) status."""
+    if not is_allowed(update.effective_user.id, update.effective_chat.id):
+        return
+
+    from hardware import battery
+
+    reading = battery.read()
+    if reading is None:
+        await update.message.reply_text(
+            "🔌 No UPS HAT detected.\n"
+            "Make sure I2C is enabled and the UPS HAT (C) is connected, "
+            "then `/battery` again. (Check `i2cdetect -y 1` should list 0x43.)",
+            parse_mode="Markdown",
+        )
+        return
+
+    await update.message.reply_text(reading.long())
+
+
 async def cmd_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /memory command — show database stats."""
     user = update.effective_user

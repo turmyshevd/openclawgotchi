@@ -119,3 +119,4 @@ lore/
 
 # Personal commands
 .claude/commands/
+data/active_model.json
