@@ -11,6 +11,9 @@ All notable changes to the OpenClawGotchi project will be documented in this fil
 - **Readable vault attachments**: Image attachments are now saved into the Obsidian-compatible vault with human-readable names instead of temp-file noise.
 - **Manual vault resync command**: `/syncvault` can trigger a local Syncthing rescan when `SYNCTHING_API_KEY` is configured.
 - **UPS HAT battery support**: Added optional UPS HAT (C) monitoring with `/battery`, system stats integration, and E-Ink header battery display.
+- **Auto-detect display variant**: optional support for the Waveshare 2.13in V4 **B-variant** (3-color, black/red/white) panel alongside the existing mono panel. Pick via env var `OCG_DISPLAY_VARIANT={mono,b,auto}`; default stays `mono` so existing installs are unchanged. Ships the Waveshare reference driver `src/drivers/epd2in13b_V4.py` (MIT) next to the existing mono one.
+- **Variant-aware display timings**: `hardware/display.py` retry-wait, refresh interval, and timeouts scale to variant. The B panel takes ~15-20 s per full refresh, so retry jumps from 4 s → 20 s, debounce becomes 30 s, and the subprocess timeout becomes 120 s — only on B; mono behaviour is unchanged.
+- **Dedup**: `update_display()` skips when `(mood, text)` matches the previous payload (was already logged but never gated). Saves a refresh cycle on E-Ink which has a limited write budget.
 
 ### Changed
 - **Vault structure for Obsidian**: New notes now use human-readable filenames without timestamp noise, `INDEX.md` no longer links to every note, and orphan notes no longer point to a fake `topics/inbox`.
@@ -21,6 +24,7 @@ All notable changes to the OpenClawGotchi project will be documented in this fil
 ### Fixed
 - **Auto-mood footer noise**: Removed duplicated live metrics from `auto_mood` footer text so the E-Ink header and footer do not drift out of sync.
 - **Release safety**: Removed hardcoded Syncthing credentials from the bot code and moved `/syncvault` configuration to environment variables.
+- **`sudo` dropped env vars when spawning the UI subprocess**: `_run_display_update` now invokes `sudo /usr/bin/env VAR=val ...` so `OCG_DISPLAY_VARIANT`, `GPIOZERO_PIN_FACTORY` and the optional `OCG_UPS_*` reach the UI script. Without this the subprocess fell back to defaults (mono driver, rpigpio backend) which on a B-variant panel + modern kernel rendered colors inverted.
 
 ## [Unreleased] - 2026-04-29
 
