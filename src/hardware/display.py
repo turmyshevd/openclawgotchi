@@ -11,7 +11,7 @@ import re
 import threading
 import time
 
-from config import UI_SCRIPT, PROJECT_DIR
+from config import UI_SCRIPT, PROJECT_DIR, BOT_LANGUAGE
 
 log = logging.getLogger(__name__)
 
@@ -166,56 +166,124 @@ def online_screen():
     """Show online screen."""
     update_display(mood="happy", text="Online", full_refresh=True)
 
+# Localized SAY: bubble strings for the error screen, keyed by BOT_LANGUAGE.
+# Japanese is preserved as the project's original cyberpunk default. Other
+# languages mirror the same five error categories. Unknown codes fall back
+# to English.
+_ERROR_SAY_BY_LANG = {
+    "ja": {
+        "default":   "システムエラー発生",  # System Error Occurred
+        "ratelimit": "レート制限超過!",      # Rate Limit Exceeded
+        "timeout":   "接続タイムアウト",     # Connection Timeout
+        "auth":      "アクセス拒否!",        # Access Denied
+        "syntax":    "構文エラー発生",       # Syntax Error
+        "llm":       "処理不能エラー",       # Processing Failed
+    },
+    "en": {
+        "default":   "System error!",
+        "ratelimit": "Too many requests!",
+        "timeout":   "Network timeout",
+        "auth":      "No access!",
+        "syntax":    "Syntax broken",
+        "llm":       "Brain frozen",
+    },
+    "de": {
+        "default":   "Systemfehler!",
+        "ratelimit": "Zu viele Anfragen!",
+        "timeout":   "Netzwerk-Timeout",
+        "auth":      "Kein Zugriff!",
+        "syntax":    "Syntax kaputt",
+        "llm":       "Hirn eingefroren",
+    },
+    "ru": {
+        "default":   "Системная ошибка!",
+        "ratelimit": "Слишком много запросов!",
+        "timeout":   "Тайм-аут сети",
+        "auth":      "Нет доступа!",
+        "syntax":    "Синтаксис сломан",
+        "llm":       "Мозг завис",
+    },
+    "es": {
+        "default":   "Error del sistema!",
+        "ratelimit": "Demasiadas solicitudes!",
+        "timeout":   "Tiempo agotado",
+        "auth":      "Sin acceso!",
+        "syntax":    "Sintaxis rota",
+        "llm":       "Cerebro congelado",
+    },
+    "fr": {
+        "default":   "Erreur système!",
+        "ratelimit": "Trop de requêtes!",
+        "timeout":   "Délai dépassé",
+        "auth":      "Pas d'accès!",
+        "syntax":    "Syntaxe cassée",
+        "llm":       "Cerveau gelé",
+    },
+}
+
+# Default if BOT_LANGUAGE is unset: keep the project's original Japanese
+# aesthetic so existing deployments don't change behaviour silently.
+_ERROR_LANG_FALLBACK_WHEN_UNSET = "ja"
+
+
+def _error_say(category: str) -> str:
+    """Pick the SAY: bubble string for an error category in the configured language."""
+    code = (BOT_LANGUAGE or "").strip().lower()
+    if not code:
+        code = _ERROR_LANG_FALLBACK_WHEN_UNSET
+    table = _ERROR_SAY_BY_LANG.get(code) or _ERROR_SAY_BY_LANG["en"]
+    return table.get(category) or _ERROR_SAY_BY_LANG["en"][category]
+
+
 def error_screen(error_msg: str):
-    """Show error screen with context-aware face and Japanese text."""
+    """Show error screen with context-aware face. SAY: text honours BOT_LANGUAGE."""
     err_lower = error_msg.lower()
-    
+
     # Default
     mood = "dead"
     short_error = "Error"
-    jp_msg = "システムエラー発生" # System Error Occurred
-    
+    say_msg = _error_say("default")
+
     # 1. Rate Limit / Quota
-    if "ratelimit" in err_lower or "quota" in err_lower:
+    if "ratelimit" in err_lower or "rate limit" in err_lower or "quota" in err_lower:
         mood = "dizzy"
-        short_error = "Rate Limited" if "ratelimit" in err_lower else "Quota Full"
-        jp_msg = "レート制限超過!" # Rate Limit Exceeded
-        
+        short_error = "Rate Limited" if "rate" in err_lower else "Quota Full"
+        say_msg = _error_say("ratelimit")
+
     # 2. Network / Timeout
-    elif "timeout" in err_lower or "connect" in err_lower:
+    elif "timeout" in err_lower or "timed out" in err_lower or "connect" in err_lower:
         mood = "bored"
         short_error = "Timeout"
-        jp_msg = "接続タイムアウト" # Connection Timeout
-        
+        say_msg = _error_say("timeout")
+
     # 3. Auth / Permission
     elif "auth" in err_lower or "permission" in err_lower or "denied" in err_lower:
         mood = "suspicious"
         short_error = "Access Denied"
-        jp_msg = "アクセス拒否!" # Access Denied
-        
+        say_msg = _error_say("auth")
+
     # 4. Parsing / Logic
     elif "parse" in err_lower or "syntax" in err_lower or "value" in err_lower:
         mood = "confused"
         short_error = "Bad Syntax"
-        jp_msg = "構文エラー発生" # Syntax Error
-        
+        say_msg = _error_say("syntax")
+
     # 5. Generic LLM Error
     elif "llm" in err_lower:
-        mood = "dizzy" 
+        mood = "dizzy"
         short_error = "Brain Freeze"
-        jp_msg = "処理不能エラー" # Processing Failed
+        say_msg = _error_say("llm")
 
     # Fallback: try to extract short code
     if short_error == "Error":
         short_error = error_msg.split(':')[0] if ':' in error_msg else error_msg[:15]
-        
+
     # Extract numeric code (e.g. 429)
     code_prefix = ""
     code_match = re.search(r'"code":\s*(\d+)', error_msg)
     if not code_match:
         code_match = re.search(r'status code:?\s*(\d+)', error_msg, re.IGNORECASE)
-    
     if code_match:
-         code_prefix = f"[{code_match.group(1)}] "
-        
-    update_display(mood=mood, text=f"SAY: {code_prefix}{jp_msg} | STATUS: ERR: {short_error}", full_refresh=True)
+        code_prefix = f"[{code_match.group(1)}] "
+
+    update_display(mood=mood, text=f"SAY: {code_prefix}{say_msg} | STATUS: ERR: {short_error}", full_refresh=True)

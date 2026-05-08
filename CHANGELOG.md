@@ -12,6 +12,11 @@ All notable changes to the OpenClawGotchi project will be documented in this fil
 ### Changed
 - **HTTP timeouts** raised via `Application.builder()` (`read=60`, `write=60`, `connect=30`, `pool=30`). Pi Zero 2W's WiFi can otherwise time out polling Telegram while a long Ollama reply is streaming, surfacing as `httpx.ReadError` / `Timed out`.
 
+### Fixed
+- **`BOT_LANGUAGE` was dead code in the system prompt**: defined in `config.py` and exposed via `.env`, but never injected anywhere — heartbeat reflections and the SAY: speech bubble would happily drift into Japanese/Chinese on Qwen-family models because no language was pinned. New `_language_directive()` in `llm/prompts.py` is part of `build_system_context()` and applies to every system prompt path (replies, heartbeat, SAY:). Codes mapped to readable names (`de` → "German (Deutsch)" etc.) for common languages; unknown codes pass through verbatim.
+- **`error_screen()` SAY: text now respects `BOT_LANGUAGE`**: previously hardcoded Japanese (`システムエラー発生` etc.), which renders as garbled glyphs for owners who don't read it. Localized into `ja` / `en` / `de` / `ru` / `es` / `fr`. Default (when `BOT_LANGUAGE` is unset) stays Japanese to preserve the original cyberpunk aesthetic; unknown codes fall back to English.
+- **Onboarding loop never exited**: `BOOTSTRAP.md` was only deleted when the LLM emitted a magic completion phrase ("onboarding complete", "saved to identity.md", …). Models that update `IDENTITY.md` correctly without that phrase left the bootstrap stale forever and re-triggered onboarding on every restart. `needs_onboarding()` now auto-completes when `IDENTITY.md` mtime > `BOOTSTRAP.md` mtime.
+
 ## [Unreleased] - 2026-04-29
 
 ### Added
