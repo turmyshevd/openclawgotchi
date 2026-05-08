@@ -39,11 +39,36 @@ FONT_DIR = PROJECT_DIR / "resources/fonts"
 # Add drivers to path
 sys.path.append(str(SRC_DIR / "drivers"))
 
-try:
-    import epd2in13_V4 as epd_driver
-except ImportError:
-    print("Error: EPD driver not found")
-    sys.exit(1)
+# Display variant selection.
+#   OCG_DISPLAY_VARIANT=mono  → epd2in13_V4    (B&W, default, partial refresh)
+#   OCG_DISPLAY_VARIANT=b     → epd2in13b_V4   (3-color, full refresh only)
+#   OCG_DISPLAY_VARIANT=auto  → prefer B if its driver is importable, else mono
+_DISPLAY_VARIANT = os.environ.get("OCG_DISPLAY_VARIANT", "mono").strip().lower()
+EPD_VARIANT_B = False  # set True after successful B-variant import
+
+if _DISPLAY_VARIANT in ("b", "epd2in13b", "3color", "tricolor"):
+    try:
+        import epd2in13b_V4 as epd_driver
+        EPD_VARIANT_B = True
+    except ImportError:
+        print("Error: OCG_DISPLAY_VARIANT=b but epd2in13b_V4 driver not found")
+        sys.exit(1)
+elif _DISPLAY_VARIANT == "auto":
+    try:
+        import epd2in13b_V4 as epd_driver
+        EPD_VARIANT_B = True
+    except ImportError:
+        try:
+            import epd2in13_V4 as epd_driver
+        except ImportError:
+            print("Error: EPD driver not found (tried epd2in13b_V4 and epd2in13_V4)")
+            sys.exit(1)
+else:  # mono / default / unknown
+    try:
+        import epd2in13_V4 as epd_driver
+    except ImportError:
+        print("Error: EPD driver not found")
+        sys.exit(1)
 
 def get_system_stats():
     """Gather system metrics."""
@@ -147,11 +172,14 @@ def render_ui(mood="happy", status_text="", fast_mode=True):
     epd = epd_driver.EPD()
     gpio_released = False
     try:
-        if fast_mode:
-            epd.init()
-        else:
-            epd.init()
-            epd.Clear(0xFF)
+        epd.init()
+        if not fast_mode:
+            # Full clear before drawing.
+            #   mono variant accepts an explicit fill colour; B-variant clears black + red layers internally.
+            if EPD_VARIANT_B:
+                epd.Clear()
+            else:
+                epd.Clear(0xFF)
             
         # Canvas (V4: 122x250 native, logic Horizontal 250x122)
         WIDTH, HEIGHT = 250, 122
@@ -451,12 +479,20 @@ def render_ui(mood="happy", status_text="", fast_mode=True):
         # image = image.rotate(180) # Uncomment if you want to test rotation
         rotated_image = image.rotate(180)
         
-        # Update Display (Standard Full only)
-        # Using displayPartBaseImage for fast_mode is safer than display_fast if contrast is issue
-        if fast_mode:
-            epd.displayPartBaseImage(epd.getbuffer(rotated_image))
+        # Update Display
+        #   mono variant: partial-base for fast_mode (no full refresh, lower flicker), full display() otherwise
+        #   B variant: only full refresh exists (3-color panel). display() takes (black, red); the red plane
+        #              stays empty (all-white image, all-0xFF buffer ⇒ no red pixels) so drawings render as
+        #              black-on-white. Red would need explicit drawing into a separate PIL image.
+        if EPD_VARIANT_B:
+            black_buf = epd.getbuffer(rotated_image)
+            red_blank = Image.new("1", rotated_image.size, 255)  # all white = no red
+            epd.display(black_buf, epd.getbuffer(red_blank))
         else:
-            epd.display(epd.getbuffer(rotated_image))
+            if fast_mode:
+                epd.displayPartBaseImage(epd.getbuffer(rotated_image))
+            else:
+                epd.display(epd.getbuffer(rotated_image))
 
         epd.sleep()
         gpio_released = True
