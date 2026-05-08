@@ -1038,6 +1038,60 @@ async def cb_model(update: Update, context: ContextTypes.DEFAULT_TYPE):
     show_face(mood="happy", text=f"Model: {key.upper()}")
 
 
+async def cmd_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Pull latest code from upstream, refresh deps, restart service."""
+    import asyncio
+    import subprocess
+    from config import PROJECT_DIR, get_admin_id
+
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    if not is_allowed(user_id, chat_id):
+        return
+
+    # Owner-only — don't let any allowed user remote-update the bot
+    admin_id = get_admin_id()
+    if admin_id and user_id != admin_id:
+        await update.message.reply_text("⛔ Owner-only command.")
+        return
+
+    script = PROJECT_DIR / "scripts" / "auto_update.sh"
+    if not script.exists():
+        await update.message.reply_text(f"❌ Update script not found: `{script}`", parse_mode="Markdown")
+        return
+
+    check_only = bool(context.args and context.args[0].lower() in ("check", "--check"))
+
+    msg = await update.message.reply_text("🔍 Checking for updates…" if check_only else "⬇️ Updating…")
+
+    try:
+        cmd = ["bash", str(script)] + (["--check"] if check_only else [])
+        proc = await asyncio.to_thread(
+            subprocess.run, cmd,
+            cwd=str(PROJECT_DIR),
+            capture_output=True, text=True, timeout=300
+        )
+        out = (proc.stdout or "") + (proc.stderr or "")
+        out = out.strip()[-3500:]  # Telegram message size budget
+
+        # check-mode: exit 0 = updates available, 1 = up-to-date
+        if check_only:
+            status = "🆕 Updates available" if proc.returncode == 0 else "✅ Up-to-date"
+            await msg.edit_text(f"{status}\n\n```\n{out}\n```", parse_mode="Markdown")
+            return
+
+        if proc.returncode == 0:
+            await msg.edit_text(f"✅ Update complete\n\n```\n{out}\n```", parse_mode="Markdown")
+            show_face(mood="excited", text="Updated!")
+        else:
+            await msg.edit_text(f"❌ Update failed (exit {proc.returncode})\n\n```\n{out}\n```", parse_mode="Markdown")
+            show_face(mood="confused", text="Update failed")
+    except subprocess.TimeoutExpired:
+        await msg.edit_text("❌ Update timed out after 5 min.")
+    except Exception as e:
+        await msg.edit_text(f"❌ Update error: `{e}`", parse_mode="Markdown")
+
+
 async def cmd_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /memory command — show database stats."""
     user = update.effective_user
