@@ -2,6 +2,21 @@
 
 All notable changes to the OpenClawGotchi project will be documented in this file.
 
+## [Unreleased] - 2026-05-08
+
+### Added
+- **`/model` Telegram command**: inline-keyboard model picker. Without args it opens buttons for every preset (gemini, glm, ollama). With an argument (`/model glm`) it falls through to the existing `/use` flow. `/use` and `/switch` remain as text aliases.
+- **Live Ollama discovery**: tapping `🦙 ollama ▸` queries the configured Ollama server (`/api/tags` + `/api/show`), filters by `capabilities.tools`, and only lists tool-capable models. Falls back to all installed models with a warning when none advertise tools. Includes `◂ Back` button and a graceful "could not reach server" state. New env vars: `OLLAMA_MODEL` and `OLLAMA_API_BASE`.
+- **Persistent model choice**: `/model`/`/use` switches now write `data/active_model.json` (gitignored). On startup `LiteLLMConnector` restores the saved model+api_base before falling back to `DEFAULT_LITE_PRESET`. Choice survives reboots and `systemctl restart`.
+- **`/update` Telegram command + `scripts/auto_update.sh`**: owner-only command that fetches `origin/main`, fast-forwards if there are new commits, refreshes venv deps when `requirements.txt` changed, and restarts the systemd service. Supports `/update check` for dry-run. Cron-friendly so the bot can also auto-update unattended.
+- **`gotchi-update` sudoers entry** in `setup.sh`: lets the bot user `systemctl restart gotchi-bot.service` without a password — needed by `/update`.
+
+### Fixed
+- **`BOT_LANGUAGE` was dead code**: defined in `config.py` and exposed via `.env`, but never injected into the system prompt. New `_language_directive()` in `llm/prompts.py` is now part of `build_system_context()` and applies to all paths (replies, heartbeat reflections, SAY: bubble). Codes are mapped to readable names (`de` → "German (Deutsch)" etc.); unknown codes pass through verbatim.
+- **Onboarding loop never exited**: `BOOTSTRAP.md` was only deleted when the LLM emitted a magic completion phrase ("onboarding complete", "saved to identity.md", …). Models that update IDENTITY.md correctly without that phrase left the bootstrap stale forever. `needs_onboarding()` now auto-completes when `IDENTITY.md` mtime > `BOOTSTRAP.md` mtime.
+- **Display showed Japanese on errors**: `error_screen()` in `hardware/display.py` had hardcoded `システムエラー発生` / `接続タイムアウト` etc. as the SAY: text. Replaced with English equivalents matching the rest of the source language.
+- **Telegram `httpx.ReadError` / `Timed out`**: default Application timeouts are too tight for Pi Zero 2W's WiFi while LiteLLM is streaming a long reply. Bumped via `Application.builder()` to `read_timeout=60`, `write_timeout=60`, `connect_timeout=30`, `pool_timeout=30`.
+
 ## [Unreleased] - 2026-04-29
 
 ### Added
