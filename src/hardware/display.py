@@ -167,55 +167,54 @@ def online_screen():
     update_display(mood="happy", text="Online", full_refresh=True)
 
 def error_screen(error_msg: str):
-    """Show error screen with context-aware face and Japanese text."""
+    """Show error screen with context-aware face and short error text."""
     err_lower = error_msg.lower()
-    
+
     # Default
     mood = "dead"
     short_error = "Error"
-    jp_msg = "システムエラー発生" # System Error Occurred
-    
+    say_msg = "System error!"
+
     # 1. Rate Limit / Quota
-    if "ratelimit" in err_lower or "quota" in err_lower:
+    if "ratelimit" in err_lower or "rate limit" in err_lower or "quota" in err_lower:
         mood = "dizzy"
-        short_error = "Rate Limited" if "ratelimit" in err_lower else "Quota Full"
-        jp_msg = "レート制限超過!" # Rate Limit Exceeded
-        
+        short_error = "Rate Limited" if "rate" in err_lower else "Quota Full"
+        say_msg = "Too many requests!"
+
     # 2. Network / Timeout
-    elif "timeout" in err_lower or "connect" in err_lower:
+    elif "timeout" in err_lower or "timed out" in err_lower or "connect" in err_lower:
         mood = "bored"
         short_error = "Timeout"
-        jp_msg = "接続タイムアウト" # Connection Timeout
-        
+        say_msg = "Network timeout"
+
     # 3. Auth / Permission
     elif "auth" in err_lower or "permission" in err_lower or "denied" in err_lower:
         mood = "suspicious"
         short_error = "Access Denied"
-        jp_msg = "アクセス拒否!" # Access Denied
-        
+        say_msg = "No access!"
+
     # 4. Parsing / Logic
     elif "parse" in err_lower or "syntax" in err_lower or "value" in err_lower:
         mood = "confused"
         short_error = "Bad Syntax"
-        jp_msg = "構文エラー発生" # Syntax Error
-        
+        say_msg = "Syntax broken"
+
     # 5. Generic LLM Error
     elif "llm" in err_lower:
-        mood = "dizzy" 
+        mood = "dizzy"
         short_error = "Brain Freeze"
-        jp_msg = "処理不能エラー" # Processing Failed
+        say_msg = "Brain frozen"
 
     # Fallback: try to extract short code
     if short_error == "Error":
         short_error = error_msg.split(':')[0] if ':' in error_msg else error_msg[:15]
-        
+
     # Extract numeric code (e.g. 429)
     code_prefix = ""
     code_match = re.search(r'"code":\s*(\d+)', error_msg)
     if not code_match:
         code_match = re.search(r'status code:?\s*(\d+)', error_msg, re.IGNORECASE)
-    
     if code_match:
-         code_prefix = f"[{code_match.group(1)}] "
-        
-    update_display(mood=mood, text=f"SAY: {code_prefix}{jp_msg} | STATUS: ERR: {short_error}", full_refresh=True)
+        code_prefix = f"[{code_match.group(1)}] "
+
+    update_display(mood=mood, text=f"SAY: {code_prefix}{say_msg} | STATUS: ERR: {short_error}", full_refresh=True)
