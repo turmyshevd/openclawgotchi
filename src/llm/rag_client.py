@@ -6,9 +6,9 @@ reranking lives on a separate host that exposes a HTTP API. This module
 is the bot-side glue.
 
 Expected API contract (kept deliberately small so any compatible server
-can be swapped in by setting RAG_API_URL):
+can be swapped in by setting RAG_REST_URL):
 
-    POST {RAG_API_URL}/rag/query
+    POST {RAG_REST_URL}/rag/query
         body: {"query": str, "collections": [str], "top_k": int,
                "rerank": bool|null}
         200 → {"query": str, "hits": [{"id", "score", "collection",
@@ -16,21 +16,24 @@ can be swapped in by setting RAG_API_URL):
                                                    …}}],
                "duration_ms": float, "reranked": bool, …}
 
-    POST {RAG_API_URL}/rag/ingest-text
+    POST {RAG_REST_URL}/rag/ingest-text
         body: {"text": str, "title": str, "collection": str,
                "tags": [str], "source_origin": str}
         202 → {"accepted": int, "queued": int, "completed": [...]}
 
-    GET  {RAG_API_URL}/health
+    GET  {RAG_REST_URL}/health
         200 → {"status": "ok", "version": str,
                "components": [{"name", "healthy", "latency_ms"}]}
 
-When RAG_API_URL is empty (default) the client is fully disabled and every
+When RAG_REST_URL is empty (default) the client is fully disabled and every
 public function returns ``None`` / ``"…not configured"`` instead of raising,
 so installs without a RAG backend are unaffected. When RAG_API_KEY is set
 it's sent as a `Authorization: Bearer …` header on every request.
 
 For an MCP-based (rather than REST) integration, see ``rag_mcp_client.py``.
+The two transports run independently — a deployment can configure one,
+the other, or both. The legacy single-URL ``RAG_API_URL`` is honored as
+a REST fallback (see ``config.py`` for the compat shim).
 """
 
 from __future__ import annotations
@@ -38,7 +41,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from config import RAG_API_URL, RAG_API_KEY, RAG_DEFAULT_COLLECTIONS
+from config import RAG_REST_URL, RAG_API_KEY, RAG_DEFAULT_COLLECTIONS
 
 log = logging.getLogger(__name__)
 
@@ -46,8 +49,8 @@ DEFAULT_TIMEOUT_S = 8.0
 
 
 def is_configured() -> bool:
-    """True when RAG_API_URL is set in the environment."""
-    return bool(RAG_API_URL)
+    """True when RAG_REST_URL is set in the environment."""
+    return bool(RAG_REST_URL)
 
 
 def _headers() -> dict[str, str]:
@@ -63,7 +66,7 @@ def _post(path: str, body: dict, timeout: float = DEFAULT_TIMEOUT_S) -> Optional
         return None
     import requests  # already pulled in by litellm
 
-    url = f"{RAG_API_URL}{path}"
+    url = f"{RAG_REST_URL}{path}"
     try:
         r = requests.post(url, json=body, headers=_headers(), timeout=timeout)
         if r.status_code >= 400:
@@ -152,7 +155,7 @@ def health() -> Optional[dict]:
         return None
     import requests
     try:
-        r = requests.get(f"{RAG_API_URL}/health", headers=_headers(), timeout=4.0)
+        r = requests.get(f"{RAG_REST_URL}/health", headers=_headers(), timeout=4.0)
         if r.ok:
             return r.json()
     except Exception as e:

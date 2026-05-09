@@ -1136,15 +1136,15 @@ async def cmd_rag(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not rag_client.is_configured():
             await update.message.reply_text(
                 "🧠 *RAG* not configured.\n\n"
-                "Set `RAG_API_URL=http://your-rag-host:8765` in `.env` and restart the bot.",
+                "Set `RAG_REST_URL=http://your-rag-host:8765` in `.env` and restart the bot.",
                 parse_mode="Markdown",
             )
             return
         h = rag_client.health()
         if h is None:
-            from config import RAG_API_URL
+            from config import RAG_REST_URL
             await update.message.reply_text(
-                f"🧠 RAG configured at `{RAG_API_URL}` but unreachable.",
+                f"🧠 RAG configured at `{RAG_REST_URL}` but unreachable.",
                 parse_mode="Markdown",
             )
             return
@@ -1174,7 +1174,7 @@ async def cmd_rag(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not rag_client.is_configured():
-        await update.message.reply_text("🧠 RAG not configured. Set `RAG_API_URL` in `.env`.", parse_mode="Markdown")
+        await update.message.reply_text("🧠 RAG not configured. Set `RAG_REST_URL` in `.env`.", parse_mode="Markdown")
         return
 
     await update.message.chat.send_action(action=ChatAction.TYPING)
