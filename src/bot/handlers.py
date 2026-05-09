@@ -896,33 +896,50 @@ async def cmd_use(update: Update, context: ContextTypes.DEFAULT_TYPE):
 _MODEL_EMOJI = {"gemini": "♊️", "glm": "🇨🇳", "ollama": "🦙"}
 
 
+# The ``http://ollama-server:11434`` literal that ships in src/config.py
+# and .env.example is a placeholder so the import never crashes; on real
+# hardware it can never resolve. Anywhere it shows up in persisted state
+# (data/active_model.json, .env, the running connector) is treated as
+# "unconfigured" so the resolver falls through instead of returning the
+# dead value to its callers.
+_OLLAMA_PLACEHOLDER = "http://ollama-server:11434"
+
+
+def _is_real_base(b: str) -> bool:
+    if not b:
+        return False
+    return b.rstrip("/") != _OLLAMA_PLACEHOLDER
+
+
 def _resolve_ollama_base() -> str:
     """Single source of truth for which Ollama host to talk to.
 
-    Priority order — the persisted choice always wins, so a private LAN
-    IP saved on the device never gets shadowed by the placeholder default
-    that ships in the repo:
+    Priority order:
       1. ``data/active_model.json`` ``api_base`` (when model is ollama_chat/*)
       2. live ``LiteLLMConnector.api_base`` (when model is ollama_chat/*)
-      3. ``OLLAMA_API_BASE`` env / config default
+      3. ``OLLAMA_API_BASE`` env / config
 
-    Returns the trimmed base URL or an empty string when nothing resolves.
+    The literal placeholder is skipped at every step. Returns the trimmed
+    base URL, or an empty string when nothing real is configured —
+    callers should then surface a clear "set OLLAMA_API_BASE in .env"
+    message rather than blindly try to connect.
     """
     from llm.litellm_connector import _load_active_model
     saved = _load_active_model()
     if saved and isinstance(saved.get("model"), str) and saved["model"].startswith("ollama_chat/"):
         base = (saved.get("api_base") or "").rstrip("/")
-        if base:
+        if _is_real_base(base):
             return base
     try:
         router = get_router()
         if isinstance(router.litellm.model, str) and router.litellm.model.startswith("ollama_chat/"):
             base = (router.litellm.api_base or "").rstrip("/")
-            if base:
+            if _is_real_base(base):
                 return base
     except Exception:
         pass
-    return (OLLAMA_API_BASE or "").rstrip("/")
+    base = (OLLAMA_API_BASE or "").rstrip("/")
+    return base if _is_real_base(base) else ""
 
 
 def _ollama_list_with_capabilities(timeout: float = 4.0) -> list[dict]:
@@ -996,7 +1013,19 @@ async def cb_model(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("omd:"):
         model_name = data.split(":", 1)[1]
         full = f"ollama_chat/{model_name}"
-        router.litellm.set_model(full, _resolve_ollama_base() or OLLAMA_API_BASE)
+        resolved = _resolve_ollama_base()
+        if not resolved:
+            await query.edit_message_text(
+                "⚠️ *Ollama host not configured.*\n\n"
+                "`OLLAMA_API_BASE` is unset or still on the placeholder. "
+                "Set it in `.env` to your real Ollama host "
+                "(e.g. `OLLAMA_API_BASE=http://192.168.1.42:11434`) "
+                "and restart the bot.",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◂ Back", callback_data="model:back")]])
+            )
+            return
+        router.litellm.set_model(full, resolved)
         router.force_lite = True
         await query.edit_message_text(
             f"🦙 Switched to *Ollama / {model_name}*\n`{full}`",
