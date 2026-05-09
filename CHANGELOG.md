@@ -2,6 +2,18 @@
 
 All notable changes to the OpenClawGotchi project will be documented in this file.
 
+## [Unreleased] - 2026-05-09
+
+### Added
+- **Bot can act as a generic MCP client over SSE.** New module `src/llm/rag_mcp_client.py` is a hand-rolled minimal MCP-over-SSE client (~250 LoC) using only the stdlib + `requests` (already in the venv via litellm). Speaks just enough of the MCP spec to do `initialize` + `tools/list` + `tools/call` against any SSE-transport server — no `mcp[cli]` dependency, so the Pi Zero 2W's RAM budget is respected (the official package pulls in `cryptography`, `pydantic-settings`, `starlette`, `uvicorn`, etc.).
+- **Two new LLM tools**: `mcp_list_tools()` (discover) and `mcp_call_tool(name, arguments)` (invoke). The agent decides which advertised tool to call. Activates only when `RAG_TRANSPORT=mcp` is set in the environment.
+- New env var `RAG_TRANSPORT=rest|mcp` (default `rest`). When `mcp` is selected, `RAG_API_URL` is interpreted as the MCP-SSE base URL (e.g. `http://your-rag-host:8766`).
+
+### Notes
+- Sync API throughout — slots into the existing TOOL_MAP dispatcher without async plumbing.
+- A single background thread reads the SSE stream and routes JSON-RPC responses by id; one connected client is reused per process via a lazy singleton.
+- Graceful degradation: when the MCP server is unreachable or `RAG_TRANSPORT` isn't set, the new tools return informative no-op strings; the bot stays alive.
+
 ## [Unreleased] - 2026-04-29
 
 ### Added
