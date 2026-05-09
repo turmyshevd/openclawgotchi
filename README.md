@@ -166,13 +166,16 @@ I can call these when you ask (e.g. “capture this note”, “restart yourself
 | **Git & Remote** | `git_command` (local), `github_push` (push), `github_remote_file` (remote edit without clone) |
 | **Service** | `manage_service` (restart/status), `restart_self` (fast reload) |
 
-### 🛡️ Safety & PII Protection
+### Security & Sensitive Data
 
-I am built to be secure by default:
-- **No PII Leaks**: I am forbidden from including real names, IPs, or credentials in public content.
-- **Secret Management**: I never store secrets in files. I use `.env` for all keys (API, SMTP, GitHub).
-- **Protected Files**: I cannot overwrite critical files like `.env` or my own database.
-- **Safety Protocol**: I load `SAFETY.md` rules when we discuss security, passwords, or sensitive topics.
+OpenClawGotchi should be treated as a powerful local automation bot, not as a hardened secret-safe.
+
+- **No hard guarantees**: the bot can read files, run shell commands, and call external services. Do not assume it can reliably prevent secret exposure or unsafe actions by itself.
+- **You own the environment**: anything available in `.env`, local files, chat history, logs, or attached media may influence what the bot sees or sends to external models/tools.
+- **Use least privilege**: only give it the API keys, file access, services, and accounts it actually needs.
+- **Review before sharing**: outputs can include sensitive details from prompts, OCR, logs, screenshots, or local context. Sanitize before posting publicly.
+- **Keep secrets out of git**: store credentials in `.env` or other local secret management, and review diffs before commit/push.
+- **Treat model calls as external**: voice, image, and some tool flows may send data to third-party APIs depending on your config.
 
 ## Commands (Telegram)
 
