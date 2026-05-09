@@ -609,20 +609,21 @@ def query_rag(query: str, top_k: int = 5) -> str:
     """Search the configured RAG vault for snippets relevant to `query`.
 
     The RAG service is a long-term, Markdown-first memory backend reachable
-    via REST (see RAG_API_URL env var and src/llm/rag_client.py for the API
+    via REST (see RAG_REST_URL env var and src/llm/rag_client.py for the API
     contract). Use this to ground answers in the user's notes before falling
     back to general knowledge. Returns a formatted list of top hits with
     file path, score and chunk text. When RAG is not configured
-    (RAG_API_URL empty) returns a clear hint instead of failing.
+    (RAG_REST_URL empty) returns a clear hint instead of failing.
     """
     from llm import rag_client
+    from config import RAG_REST_URL
     if not rag_client.is_configured():
-        return "RAG not configured (set RAG_API_URL in .env). Falling back to in-bot memory."
+        return "RAG not configured (set RAG_REST_URL in .env). Falling back to in-bot memory."
     if not query or not query.strip():
         return "Error: query is empty"
     response = rag_client.query(query, top_k=top_k)
     if response is None:
-        return f"Error: RAG service unreachable at {os.environ.get('RAG_API_URL', '?')}"
+        return f"Error: RAG service unreachable at {RAG_REST_URL or '?'}"
     return rag_client.format_hits(response)
 
 
@@ -634,29 +635,31 @@ def persist_to_rag(text: str, title: str = "", tags: str = "") -> str:
     `tags` is a comma-separated string for ergonomics.
     """
     from llm import rag_client
+    from config import RAG_REST_URL
     if not rag_client.is_configured():
-        return "RAG not configured (set RAG_API_URL in .env)."
+        return "RAG not configured (set RAG_REST_URL in .env)."
     if not text or len(text.strip()) < 10:
         return "Error: text too short to be worth persisting (min 10 chars)"
     tag_list = [t.strip() for t in (tags or "").split(",") if t.strip()] or None
     response = rag_client.persist(text, title=title or None, tags=tag_list)
     if response is None:
-        return f"Error: RAG service unreachable at {os.environ.get('RAG_API_URL', '?')}"
+        return f"Error: RAG service unreachable at {RAG_REST_URL or '?'}"
     return f"Persisted to vault. Server: {str(response)[:200]}"
 
 
 def mcp_list_tools() -> str:
     """List the tools advertised by the configured MCP server.
 
-    Activates only when ``RAG_TRANSPORT=mcp`` is set in the environment
-    (the bot's REST RAG path is the default). Useful for the LLM to
-    discover what's available before calling ``mcp_call_tool``. Returns
-    a compact rendered list with name + description so the LLM picks
-    the right tool without needing the full JSON Schema.
+    Activates when ``RAG_MCP_URL`` is set in the environment (or the
+    legacy ``RAG_API_URL`` + ``RAG_TRANSPORT=mcp`` combo). Useful for
+    the LLM to discover what's available before calling
+    ``mcp_call_tool``. Returns a compact rendered list with name +
+    description so the LLM picks the right tool without needing the
+    full JSON Schema.
     """
     from llm import rag_mcp_client
     if not rag_mcp_client.is_enabled():
-        return "MCP transport not enabled (set RAG_TRANSPORT=mcp + RAG_API_URL pointing at the SSE base)."
+        return "MCP transport not enabled (set RAG_MCP_URL in .env)."
     client = rag_mcp_client.get_client()
     if client is None:
         return "MCP client unavailable (server unreachable or not configured)."
@@ -678,13 +681,13 @@ def mcp_call_tool(name: str, arguments: str = "{}") -> str:
     """Invoke a tool on the configured MCP server by name.
 
     ``arguments`` is a JSON string (the LLM emits one). Returns the
-    server's response, flattened to readable text. Activates only
-    when ``RAG_TRANSPORT=mcp``. Use ``mcp_list_tools`` first to see
+    server's response, flattened to readable text. Activates when
+    ``RAG_MCP_URL`` is set. Use ``mcp_list_tools`` first to see
     what's available.
     """
     from llm import rag_mcp_client
     if not rag_mcp_client.is_enabled():
-        return "MCP transport not enabled (set RAG_TRANSPORT=mcp)."
+        return "MCP transport not enabled (set RAG_MCP_URL in .env)."
     client = rag_mcp_client.get_client()
     if client is None:
         return "MCP client unavailable."
@@ -1152,7 +1155,7 @@ TOOLS = [
     }},
     {"type": "function", "function": {
         "name": "query_rag",
-        "description": "Search the configured RAG vault — long-term, Markdown-first memory hosted on a separate service. Use BEFORE answering questions about user notes / projects / past decisions, to ground replies in real content rather than hallucinate. Returns top hits with file path + excerpt + score. Disabled when RAG_API_URL is not set.",
+        "description": "Search the configured RAG vault — long-term, Markdown-first memory hosted on a separate service. Use BEFORE answering questions about user notes / projects / past decisions, to ground replies in real content rather than hallucinate. Returns top hits with file path + excerpt + score. Disabled when RAG_REST_URL is not set.",
         "parameters": {"type": "object", "properties": {
             "query": {"type": "string", "description": "Natural-language search query"},
             "top_k": {"type": "integer", "description": "How many hits to return (default 5, max 50)"}
@@ -1160,7 +1163,7 @@ TOOLS = [
     }},
     {"type": "function", "function": {
         "name": "persist_to_rag",
-        "description": "Save a markdown note / reflection to the configured RAG vault for future recall. Use SPARINGLY — only for content worth recalling later (decisions, preferences, project context). Do NOT persist casual chat. Disabled when RAG_API_URL is not set.",
+        "description": "Save a markdown note / reflection to the configured RAG vault for future recall. Use SPARINGLY — only for content worth recalling later (decisions, preferences, project context). Do NOT persist casual chat. Disabled when RAG_REST_URL is not set.",
         "parameters": {"type": "object", "properties": {
             "text": {"type": "string", "description": "Markdown body of the note (10+ chars)"},
             "title": {"type": "string", "description": "Optional short title"},
@@ -1169,12 +1172,12 @@ TOOLS = [
     }},
     {"type": "function", "function": {
         "name": "mcp_list_tools",
-        "description": "List the tools advertised by the configured MCP server (RAG_API_URL when RAG_TRANSPORT=mcp). Use BEFORE mcp_call_tool to discover what's available. Disabled when RAG_TRANSPORT is not 'mcp'.",
+        "description": "List the tools advertised by the configured MCP server (RAG_MCP_URL). Use BEFORE mcp_call_tool to discover what's available. Disabled when RAG_MCP_URL is not set.",
         "parameters": {"type": "object", "properties": {}, "required": []}
     }},
     {"type": "function", "function": {
         "name": "mcp_call_tool",
-        "description": "Invoke a tool on the configured MCP server by name. Use mcp_list_tools first. `arguments` is a JSON object encoded as a string. Disabled when RAG_TRANSPORT is not 'mcp'.",
+        "description": "Invoke a tool on the configured MCP server by name. Use mcp_list_tools first. `arguments` is a JSON object encoded as a string. Disabled when RAG_MCP_URL is not set.",
         "parameters": {"type": "object", "properties": {
             "name": {"type": "string", "description": "Tool name as advertised by the server"},
             "arguments": {"type": "string", "description": "JSON object literal as a string, e.g. '{\"query\":\"hello\",\"top_k\":3}'"}
@@ -1287,7 +1290,7 @@ _TOOL_ICONS = {
 # ============================================================
 # MCP TOOL AUTO-REGISTRATION
 # ============================================================
-# When RAG_TRANSPORT=mcp and the MCP server is reachable, discover
+# When RAG_MCP_URL is set and the MCP server is reachable, discover
 # its advertised tools at module-init time and register each as a
 # first-class TOOL_MAP entry (with full JSON-Schema). The LLM then
 # calls e.g. ``rag_search(query=..., top_k=3)`` directly instead of

@@ -38,8 +38,34 @@ OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:14b")
 OLLAMA_API_BASE = os.environ.get("OLLAMA_API_BASE", "http://ollama-server:11434")
 
 # Optional external RAG (Retrieval-Augmented Generation) service.
-# When RAG_API_URL is empty the rag tools degrade gracefully (no-op).
-RAG_API_URL = os.environ.get("RAG_API_URL", "").rstrip("/")
+#
+# Two independent transports may be configured side-by-side — typical
+# rag-core deployment exposes REST on :8765 and an MCP-SSE gateway on
+# :8766, both running simultaneously. Setting both vars enables both
+# tool sets without conflict.
+#
+#   RAG_REST_URL   — REST API base, e.g. http://your-rag-host:8765
+#   RAG_MCP_URL    — MCP-over-SSE base, e.g. http://your-rag-host:8766
+#
+# Legacy single-URL config is still honored: if neither of the new
+# vars is set but the old RAG_API_URL is, it is mapped onto whichever
+# transport RAG_TRANSPORT (rest|mcp, default rest) selects. Empty →
+# all RAG tools degrade gracefully (no-op).
+RAG_REST_URL = os.environ.get("RAG_REST_URL", "").rstrip("/")
+RAG_MCP_URL = os.environ.get("RAG_MCP_URL", "").rstrip("/")
+
+_legacy_rag_url = os.environ.get("RAG_API_URL", "").rstrip("/")
+_legacy_rag_transport = os.environ.get("RAG_TRANSPORT", "rest").strip().lower()
+if _legacy_rag_url:
+    if _legacy_rag_transport == "mcp" and not RAG_MCP_URL:
+        RAG_MCP_URL = _legacy_rag_url
+    elif _legacy_rag_transport != "mcp" and not RAG_REST_URL:
+        RAG_REST_URL = _legacy_rag_url
+
+# Backwards-compat alias: any code still reading RAG_API_URL keeps
+# seeing the REST URL (the historical meaning).
+RAG_API_URL = RAG_REST_URL
+
 RAG_API_KEY = os.environ.get("RAG_API_KEY", "")
 RAG_DEFAULT_COLLECTIONS = [
     c.strip() for c in os.environ.get("RAG_DEFAULT_COLLECTIONS", "agent_notes").split(",") if c.strip()

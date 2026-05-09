@@ -29,11 +29,14 @@ Public surface:
 All synchronous — designed to slot into the bot's existing sync
 TOOL_MAP dispatcher in litellm_connector.py without async plumbing.
 
-Activation is gated by env var ``RAG_TRANSPORT=mcp`` (default
-``rest``). When ``mcp`` is selected, ``RAG_API_URL`` is interpreted as
-the MCP-SSE base URL (e.g. ``http://your-rag-host:8766``). When the
-client is unreachable, callers fall back to None / empty results so
-the bot stays alive.
+Activation is gated by env var ``RAG_MCP_URL`` — set it to the
+MCP-SSE base URL (e.g. ``http://your-rag-host:8766``). REST and MCP
+transports run side-by-side: configure ``RAG_REST_URL`` for the REST
+endpoint and ``RAG_MCP_URL`` for the MCP gateway, both can be active
+at once. Legacy single-URL deployments using ``RAG_API_URL`` +
+``RAG_TRANSPORT=mcp`` still work via the compat shim in ``config.py``.
+When the MCP server is unreachable, callers fall back to None / empty
+results so the bot stays alive.
 """
 
 from __future__ import annotations
@@ -51,9 +54,26 @@ DEFAULT_TIMEOUT_S = 15.0
 DEFAULT_PROTOCOL_VERSION = "2024-11-05"
 
 
+def _resolve_mcp_url() -> str:
+    """Return the configured MCP-SSE base URL, honouring the legacy alias.
+
+    Priority:
+      1. ``RAG_MCP_URL`` (the canonical, post-split env var).
+      2. ``RAG_API_URL`` when ``RAG_TRANSPORT=mcp`` (legacy deployments
+         from before the split — kept working without config edits).
+    """
+    url = os.environ.get("RAG_MCP_URL", "").strip().rstrip("/")
+    if url:
+        return url
+    legacy = os.environ.get("RAG_API_URL", "").strip().rstrip("/")
+    if legacy and os.environ.get("RAG_TRANSPORT", "rest").strip().lower() == "mcp":
+        return legacy
+    return ""
+
+
 def is_enabled() -> bool:
-    """True when the bot is configured to use MCP for RAG."""
-    return os.environ.get("RAG_TRANSPORT", "rest").strip().lower() == "mcp"
+    """True when an MCP-SSE base URL is configured (new var or legacy)."""
+    return bool(_resolve_mcp_url())
 
 
 class MCPSSEClient:
@@ -291,10 +311,7 @@ def get_client() -> Optional[MCPSSEClient]:
     `initialize`. Subsequent calls reuse the same client. If the
     server is unreachable, returns None (callers fall back).
     """
-    if not is_enabled():
-        return None
-
-    base = os.environ.get("RAG_API_URL", "").rstrip("/")
+    base = _resolve_mcp_url()
     if not base:
         return None
     api_key = os.environ.get("RAG_API_KEY", "") or None
