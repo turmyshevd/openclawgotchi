@@ -11,6 +11,41 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 USER="$(whoami)"
 ENV_FILE="${SCRIPT_DIR}/.env"
 
+# Helper: ensure OLLAMA_API_BASE in $ENV_FILE points at the user's actual
+# Ollama host (or is left empty / commented). The repo ships a placeholder
+# default in src/config.py so the import never crashes — but on a real
+# device that placeholder produces "could not reach ollama-server:11434"
+# the moment anything touches Ollama. Prompt the user once during setup
+# and write the resolved value to .env (gitignored, never committed).
+configure_ollama_base() {
+    local current
+    current=$(grep -E "^OLLAMA_API_BASE=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2-)
+    # Skip if already set to a real-looking value (anything but the placeholder).
+    if [ -n "$current" ] && [ "$current" != "http://ollama-server:11434" ]; then
+        echo "  ✅ Ollama base already set: $current"
+        return 0
+    fi
+    echo ""
+    echo "  🦙 Optional: local/LAN Ollama server for tool-capable open models"
+    echo "     Leave blank to skip — you can still use gemini / glm only."
+    read -p "  Ollama API base [skip] (e.g. http://192.168.1.42:11434): " OLLAMA_BASE
+    if [ -z "$OLLAMA_BASE" ]; then
+        echo "  ℹ️  No Ollama host configured. /model → ollama will report 'unreachable' until you set OLLAMA_API_BASE in .env."
+        return 0
+    fi
+    # Normalize: prepend http:// if user typed bare host:port
+    case "$OLLAMA_BASE" in
+        http://*|https://*) ;;
+        *) OLLAMA_BASE="http://${OLLAMA_BASE}" ;;
+    esac
+    if grep -qE "^OLLAMA_API_BASE=" "$ENV_FILE"; then
+        sed -i "s|^OLLAMA_API_BASE=.*|OLLAMA_API_BASE=${OLLAMA_BASE}|" "$ENV_FILE"
+    else
+        echo "OLLAMA_API_BASE=${OLLAMA_BASE}" >> "$ENV_FILE"
+    fi
+    echo "  ✅ Ollama base saved to .env"
+}
+
 # ============================================
 # STEP 1: Check Python
 # ============================================
@@ -41,6 +76,9 @@ if [ -f "$ENV_FILE" ]; then
     else
         echo "  ✅ Token already configured"
     fi
+    # Always offer to fix the Ollama base if it's still on the placeholder —
+    # missing or default value only, otherwise quiet.
+    configure_ollama_base
 else
     echo "  Creating .env from template..."
     cp "${SCRIPT_DIR}/.env.example" "$ENV_FILE"
@@ -90,7 +128,11 @@ else
     else
         echo "  ℹ️  No Gemini key provided. The default Lite preset remains glm, which requires its own provider key in .env."
     fi
-    
+
+    # Ollama base (optional, but ask up-front so /model → ollama doesn't
+    # silently fail with the http://ollama-server:11434 placeholder).
+    configure_ollama_base
+
     echo ""
     echo "  ✅ Configuration saved to .env"
 fi
