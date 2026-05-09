@@ -146,11 +146,27 @@ async def send_heartbeat(context):
     """
     Periodic heartbeat: auto-mood, XP, mail check, reflect.
     Called every 4 hours.
+
+    Respects the user's quiet schedule (utils.timing): when
+    ``current_verbosity()`` is SILENT, the heartbeat returns early
+    without doing autonomous output. Critical states (e.g. an OOM-class
+    auto-mood) still update the display so the warning isn't muted —
+    only the chatty side-effects (mail, summaries, reflection prompt)
+    are skipped.
     """
+    from utils.timing import current_verbosity, SILENT
+    verbosity = current_verbosity()
+
     run_hook(HookEvent(event_type="heartbeat", action="start"))
 
-    # 1. Apply auto-mood first
+    # 1. Apply auto-mood first — keep this even at SILENT so a critical
+    #    state (OOM!, OVERHEATING!) still surfaces on the display.
     mood, mood_text = apply_auto_mood()
+
+    if verbosity == SILENT:
+        log.info(f"Heartbeat skipped — quiet schedule says SILENT (mood={mood}, text={mood_text!r})")
+        run_hook(HookEvent(event_type="heartbeat", action="silent_skip"))
+        return
 
     # 2. Award heartbeat XP
     on_heartbeat()
@@ -294,6 +310,34 @@ async def send_heartbeat(context):
         prompt += "\nThink about something DIFFERENT this time.\n"
 
     prompt += "\n\n[Reflect. Think out loud. Then FACE: and SAY:]"
+
+    # The HEARTBEAT.md template is English; without a hard language pin
+    # the model defaults to English part of the time even when BOT_LANGUAGE
+    # is set, because the long English user prompt overpowers the
+    # system-level directive. Pin the language at BOTH ends of the prompt
+    # so the model can't drift no matter where its attention is anchored.
+    from config import BOT_LANGUAGE
+    _LANG_NAMES = {
+        "de": "Deutsch", "en": "English", "ru": "Русский", "es": "Español",
+        "fr": "Français", "it": "Italiano", "pt": "Português", "nl": "Nederlands",
+        "pl": "Polski", "tr": "Türkçe", "ja": "日本語", "zh": "中文", "ko": "한국어",
+    }
+    _lang_code = (BOT_LANGUAGE or "").strip().lower()
+    if _lang_code and _lang_code != "en":
+        _lang_name = _LANG_NAMES.get(_lang_code, _lang_code)
+        # Front pin: forces language before the English template starts.
+        prompt = (
+            f"## Sprache der Antwort: {_lang_name}\n\n"
+            f"Schreibe **die GESAMTE Antwort** auf {_lang_name}. Jedes Wort, jeder "
+            f"Satz, auch die SAY:- und FACE:-Zeilen am Ende. Die Vorlage unten ist "
+            f"nur auf Englisch, weil sie eine Systemanweisung ist — DEINE Antwort "
+            f"muss auf {_lang_name} sein.\n\n---\n\n"
+        ) + prompt
+        # End pin: last word the model reads before generating its first token.
+        prompt += (
+            f"\n\n[Reflektiere auf {_lang_name}. Antworte auf {_lang_name}. "
+            f"Nicht auf Englisch. {_lang_name} only.]"
+        )
     
     # 7. Call LLM
     router = get_router()

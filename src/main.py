@@ -23,7 +23,7 @@ from pathlib import Path
 SRC_DIR = Path(__file__).parent.resolve()
 sys.path.insert(0, str(SRC_DIR))
 
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 
 from config import BOT_TOKEN, HEARTBEAT_INTERVAL, HEARTBEAT_FIRST_RUN, LEVEL_UP_DISPLAY_DELAY
 from db.memory import init_db
@@ -31,7 +31,7 @@ from hardware.display import boot_screen, online_screen, show_face
 from bot.handlers import (
     cmd_start, cmd_clear, cmd_context, cmd_status, cmd_xp, cmd_pro, cmd_use,
     cmd_remember, cmd_recall, cmd_vault, cmd_cron, cmd_jobs, cmd_memory, cmd_health,
-    handle_message, handle_voice
+    cmd_model, cb_model, cmd_update, cmd_battery, cmd_rag, cmd_quiet, handle_message, handle_voice
 )
 from bot.heartbeat import send_heartbeat
 from hooks.runner import run_hook, HookEvent, discover_and_load_hooks
@@ -219,6 +219,8 @@ def main():
             BotCommand("vault", "Knowledge vault status"),
             BotCommand("context", "View/trim context window"),
             BotCommand("mode", "Toggle Lite/Pro mode"),
+            BotCommand("model", "Switch LLM model (gemini/glm/ollama)"),
+            BotCommand("quiet", "Time-of-day verbosity schedule"),
             BotCommand("xp", "XP rules & progress"),
             BotCommand("remember", "Save fact: /remember cat fact"),
             BotCommand("recall", "Search memory: /recall query"),
@@ -244,7 +246,19 @@ def main():
             application.job_queue.run_once(chill_mode, 60)
     
     # Build application
-    app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
+    # Generous HTTP timeouts — Pi Zero 2W's WiFi can otherwise time out polling
+    # Telegram while a long Ollama reply is streaming, surfacing as
+    # `httpx.ReadError` / `Timed out`.
+    app = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .post_init(post_init)
+        .read_timeout(60)
+        .write_timeout(60)
+        .connect_timeout(30)
+        .pool_timeout(30)
+        .build()
+    )
     
     # Register handlers
     app.add_handler(CommandHandler("start", cmd_start))
@@ -257,14 +271,20 @@ def main():
     app.add_handler(CommandHandler("mode", cmd_pro))
     app.add_handler(CommandHandler("use", cmd_use))
     app.add_handler(CommandHandler("switch", cmd_use))
+    app.add_handler(CommandHandler("model", cmd_model))
+    app.add_handler(CallbackQueryHandler(cb_model, pattern=r"^(model|omd):|^setollama$"))
     app.add_handler(CommandHandler("remember", cmd_remember))
     app.add_handler(CommandHandler("recall", cmd_recall))
     app.add_handler(CommandHandler("vault", cmd_vault))
+    app.add_handler(CommandHandler("rag", cmd_rag))
     app.add_handler(CommandHandler("cron", cmd_cron))
     app.add_handler(CommandHandler("jobs", cmd_jobs))
 
     app.add_handler(CommandHandler("memory", cmd_memory))
     app.add_handler(CommandHandler("health", cmd_health))
+    app.add_handler(CommandHandler("update", cmd_update))
+    app.add_handler(CommandHandler("battery", cmd_battery))
+    app.add_handler(CommandHandler("quiet", cmd_quiet))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
 

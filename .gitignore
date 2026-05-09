@@ -102,6 +102,8 @@ coverage.xml
 # ===================
 rate_limits.json
 data/cron_jobs.json
+data/active_model.json
+backups/
 # data/custom_faces.json
 
 # ===================
@@ -117,3 +119,5 @@ lore/
 
 # Personal commands
 .claude/commands/
+data/active_model.json
+data/quiet_schedule.json

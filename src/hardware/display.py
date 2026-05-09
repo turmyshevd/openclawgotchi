@@ -11,18 +11,34 @@ import re
 import threading
 import time
 
-from config import UI_SCRIPT, PROJECT_DIR
+import os
+
+from config import UI_SCRIPT, PROJECT_DIR, BOT_LANGUAGE
 
 log = logging.getLogger(__name__)
 
-# E-Ink ghosting: every N-th update do full refresh so the panel actually redraws
+# Display variant — needs different timing.
+#   mono (epd2in13_V4)   : ~2 s per refresh, supports partial — short retry OK
+#   B    (epd2in13b_V4)  : ~15 s per refresh, full refresh only — much longer retry needed
+_DISPLAY_VARIANT = os.environ.get("OCG_DISPLAY_VARIANT", "mono").strip().lower()
+_VARIANT_B = _DISPLAY_VARIANT in ("b", "epd2in13b", "3color", "tricolor", "auto")
+
+# E-Ink ghosting: every N-th update do full refresh so the panel actually redraws.
+# Only relevant for the mono variant — the B variant always does a full refresh.
 _display_update_count = 0
 FULL_REFRESH_EVERY = 3
 
+# Dedup + debounce — skip updates that are identical to the last one or arrive
+# too quickly. Especially valuable on the B variant where every refresh is full.
+_MIN_UPDATE_INTERVAL = 30 if _VARIANT_B else 0   # seconds between non-forced updates
+_last_update_ts = 0.0
+_last_payload = (None, None)  # (mood, text)
+
 # Only one UI script at a time — avoids "GPIO busy" from overlapping runs
 _display_lock = threading.Lock()
-_DISPLAY_TIMEOUT = 45  # seconds
-_DISPLAY_BUSY_RETRY_WAIT = 4  # seconds before retry when display was busy
+# B variant: full refresh ~15-20 s + boot/font overhead can push the first render over a minute.
+_DISPLAY_TIMEOUT = 120 if _VARIANT_B else 45  # seconds
+_DISPLAY_BUSY_RETRY_WAIT = 20 if _VARIANT_B else 4  # seconds before retry when display was busy
 
 
 def _run_display_update(cmd: list):
@@ -51,15 +67,54 @@ def _run_display_update(cmd: list):
 
 def update_display(mood: str = None, text: str = None, full_refresh: bool = False):
     """Update display with mood and/or text in a single call."""
-    global _display_update_count
+    global _display_update_count, _last_update_ts, _last_payload
     if not mood and not text:
         return
 
-    _display_update_count += 1
-    if not full_refresh and _display_update_count % FULL_REFRESH_EVERY == 0:
-        full_refresh = True  # Force full redraw periodically to avoid stuck E-Ink
+    payload = (mood, text)
+    now = time.monotonic()
 
-    cmd = ["sudo", str(PROJECT_DIR / "venv/bin/python3"), str(UI_SCRIPT)]
+    # Dedup — skip identical consecutive updates (e.g. heartbeat re-emitting
+    # the same face/text). Saves a refresh cycle on E-Ink which is finite.
+    if payload == _last_payload and not full_refresh:
+        log.debug(f"Display: same payload, skip ({mood}/{text})")
+        return
+
+    # Debounce on the B variant only (mono is fast enough to update at will).
+    # _MIN_UPDATE_INTERVAL == 0 disables the gate.
+    if (_MIN_UPDATE_INTERVAL > 0
+            and not full_refresh
+            and (now - _last_update_ts) < _MIN_UPDATE_INTERVAL):
+        log.debug(f"Display: debounced ({now - _last_update_ts:.1f}s < {_MIN_UPDATE_INTERVAL}s)")
+        return
+
+    _last_update_ts = now
+    _last_payload = payload
+
+    # Anti-ghosting: every N-th update force a full redraw on the mono variant.
+    # The B variant always does a full refresh anyway, so this branch is a no-op there.
+    if not _VARIANT_B:
+        _display_update_count += 1
+        if not full_refresh and _display_update_count % FULL_REFRESH_EVERY == 0:
+            full_refresh = True
+
+    # `sudo` strips most environment variables (env_reset Defaults). Propagate
+    # the display-related ones via /usr/bin/env so the spawned UI script sees
+    # the correct driver variant (OCG_DISPLAY_VARIANT) and GPIO backend
+    # (GPIOZERO_PIN_FACTORY). Without this the subprocess falls back to
+    # defaults (mono driver, rpigpio backend) which on a B-variant panel +
+    # modern kernel renders inverted colors.
+    propagate_env = {
+        k: v for k, v in os.environ.items()
+        if k in (
+            "OCG_DISPLAY_VARIANT", "GPIOZERO_PIN_FACTORY",
+            "OCG_UPS_BUS", "OCG_UPS_ADDR",
+            "BOT_NAME", "OWNER_NAME", "BOT_LANGUAGE",
+        )
+    }
+    cmd = ["sudo", "/usr/bin/env"]
+    cmd.extend(f"{k}={v}" for k, v in propagate_env.items())
+    cmd.extend([str(PROJECT_DIR / "venv/bin/python3"), str(UI_SCRIPT)])
     if mood:
         cmd.extend(["--mood", mood])
     if text:
@@ -166,56 +221,124 @@ def online_screen():
     """Show online screen."""
     update_display(mood="happy", text="Online", full_refresh=True)
 
+# Localized SAY: bubble strings for the error screen, keyed by BOT_LANGUAGE.
+# Japanese is preserved as the project's original cyberpunk default. Other
+# languages mirror the same five error categories. Unknown codes fall back
+# to English.
+_ERROR_SAY_BY_LANG = {
+    "ja": {
+        "default":   "システムエラー発生",  # System Error Occurred
+        "ratelimit": "レート制限超過!",      # Rate Limit Exceeded
+        "timeout":   "接続タイムアウト",     # Connection Timeout
+        "auth":      "アクセス拒否!",        # Access Denied
+        "syntax":    "構文エラー発生",       # Syntax Error
+        "llm":       "処理不能エラー",       # Processing Failed
+    },
+    "en": {
+        "default":   "System error!",
+        "ratelimit": "Too many requests!",
+        "timeout":   "Network timeout",
+        "auth":      "No access!",
+        "syntax":    "Syntax broken",
+        "llm":       "Brain frozen",
+    },
+    "de": {
+        "default":   "Systemfehler!",
+        "ratelimit": "Zu viele Anfragen!",
+        "timeout":   "Netzwerk-Timeout",
+        "auth":      "Kein Zugriff!",
+        "syntax":    "Syntax kaputt",
+        "llm":       "Hirn eingefroren",
+    },
+    "ru": {
+        "default":   "Системная ошибка!",
+        "ratelimit": "Слишком много запросов!",
+        "timeout":   "Тайм-аут сети",
+        "auth":      "Нет доступа!",
+        "syntax":    "Синтаксис сломан",
+        "llm":       "Мозг завис",
+    },
+    "es": {
+        "default":   "Error del sistema!",
+        "ratelimit": "Demasiadas solicitudes!",
+        "timeout":   "Tiempo agotado",
+        "auth":      "Sin acceso!",
+        "syntax":    "Sintaxis rota",
+        "llm":       "Cerebro congelado",
+    },
+    "fr": {
+        "default":   "Erreur système!",
+        "ratelimit": "Trop de requêtes!",
+        "timeout":   "Délai dépassé",
+        "auth":      "Pas d'accès!",
+        "syntax":    "Syntaxe cassée",
+        "llm":       "Cerveau gelé",
+    },
+}
+
+# Default if BOT_LANGUAGE is unset: keep the project's original Japanese
+# aesthetic so existing deployments don't change behaviour silently.
+_ERROR_LANG_FALLBACK_WHEN_UNSET = "ja"
+
+
+def _error_say(category: str) -> str:
+    """Pick the SAY: bubble string for an error category in the configured language."""
+    code = (BOT_LANGUAGE or "").strip().lower()
+    if not code:
+        code = _ERROR_LANG_FALLBACK_WHEN_UNSET
+    table = _ERROR_SAY_BY_LANG.get(code) or _ERROR_SAY_BY_LANG["en"]
+    return table.get(category) or _ERROR_SAY_BY_LANG["en"][category]
+
+
 def error_screen(error_msg: str):
-    """Show error screen with context-aware face and Japanese text."""
+    """Show error screen with context-aware face. SAY: text honours BOT_LANGUAGE."""
     err_lower = error_msg.lower()
-    
+
     # Default
     mood = "dead"
     short_error = "Error"
-    jp_msg = "システムエラー発生" # System Error Occurred
-    
+    say_msg = _error_say("default")
+
     # 1. Rate Limit / Quota
-    if "ratelimit" in err_lower or "quota" in err_lower:
+    if "ratelimit" in err_lower or "rate limit" in err_lower or "quota" in err_lower:
         mood = "dizzy"
-        short_error = "Rate Limited" if "ratelimit" in err_lower else "Quota Full"
-        jp_msg = "レート制限超過!" # Rate Limit Exceeded
-        
+        short_error = "Rate Limited" if "rate" in err_lower else "Quota Full"
+        say_msg = _error_say("ratelimit")
+
     # 2. Network / Timeout
-    elif "timeout" in err_lower or "connect" in err_lower:
+    elif "timeout" in err_lower or "timed out" in err_lower or "connect" in err_lower:
         mood = "bored"
         short_error = "Timeout"
-        jp_msg = "接続タイムアウト" # Connection Timeout
-        
+        say_msg = _error_say("timeout")
+
     # 3. Auth / Permission
     elif "auth" in err_lower or "permission" in err_lower or "denied" in err_lower:
         mood = "suspicious"
         short_error = "Access Denied"
-        jp_msg = "アクセス拒否!" # Access Denied
-        
+        say_msg = _error_say("auth")
+
     # 4. Parsing / Logic
     elif "parse" in err_lower or "syntax" in err_lower or "value" in err_lower:
         mood = "confused"
         short_error = "Bad Syntax"
-        jp_msg = "構文エラー発生" # Syntax Error
-        
+        say_msg = _error_say("syntax")
+
     # 5. Generic LLM Error
     elif "llm" in err_lower:
-        mood = "dizzy" 
+        mood = "dizzy"
         short_error = "Brain Freeze"
-        jp_msg = "処理不能エラー" # Processing Failed
+        say_msg = _error_say("llm")
 
     # Fallback: try to extract short code
     if short_error == "Error":
         short_error = error_msg.split(':')[0] if ':' in error_msg else error_msg[:15]
-        
+
     # Extract numeric code (e.g. 429)
     code_prefix = ""
     code_match = re.search(r'"code":\s*(\d+)', error_msg)
     if not code_match:
         code_match = re.search(r'status code:?\s*(\d+)', error_msg, re.IGNORECASE)
-    
     if code_match:
-         code_prefix = f"[{code_match.group(1)}] "
-        
-    update_display(mood=mood, text=f"SAY: {code_prefix}{jp_msg} | STATUS: ERR: {short_error}", full_refresh=True)
+        code_prefix = f"[{code_match.group(1)}] "
+
+    update_display(mood=mood, text=f"SAY: {code_prefix}{say_msg} | STATUS: ERR: {short_error}", full_refresh=True)
