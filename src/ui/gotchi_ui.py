@@ -299,10 +299,10 @@ def render_ui(mood="happy", status_text="", fast_mode=True):
         draw.text((2, 1), display_name, font=font_ui, fill=0)
         
         # Right: Stats (Formatted clearly)
-        # e.g. T:45C | Free:120M | 14:00 | 87%/4.09V
+        # e.g. T:45C | Free:120M | 14:00
+        # Battery info is rendered separately in the footer (not here) so the
+        # bot name on the left isn't pushed off-screen by long stats lines.
         txt_stats = f"T:{stats['temp']}°C | Free:{stats['mem_avail']}MB | {now}"
-        if battery_text:
-            txt_stats += f" | {battery_text}"
         bbox = draw.textbbox((0, 0), txt_stats, font=font_ui)
         w = bbox[2] - bbox[0]
         draw.text((WIDTH - w - 2, 1), txt_stats, font=font_ui, fill=0)
@@ -347,12 +347,31 @@ def render_ui(mood="happy", status_text="", fast_mode=True):
         except Exception:
             xp_str = ""
         
-        # Draw status on left, XP on right
-        draw.text((4, HEIGHT - FOOTER_H + 1), status_text[:35], font=font_ui, fill=0)
+        # Footer layout: status (left) | battery (centre) | XP (right).
+        # The battery cell lives in the footer rather than the header so the
+        # bot name on the top-left has room and the panel can show all three
+        # at once. On the B variant we render the battery suffix into the
+        # red layer when battery_low — otherwise normal black ink.
+        draw.text((4, HEIGHT - FOOTER_H + 1), status_text[:30], font=font_ui, fill=0)
+
+        xp_w = 0
         if xp_str:
             bbox_xp = draw.textbbox((0, 0), xp_str, font=font_ui)
             xp_w = bbox_xp[2] - bbox_xp[0]
             draw.text((WIDTH - xp_w - 4, HEIGHT - FOOTER_H + 1), xp_str, font=font_ui, fill=0)
+
+        if battery_text:
+            bbox_bat = draw.textbbox((0, 0), battery_text, font=font_ui)
+            bat_w = bbox_bat[2] - bbox_bat[0]
+            bat_x = (WIDTH - bat_w) // 2
+            bat_y = HEIGHT - FOOTER_H + 1
+            if red_draw is not None and battery_low:
+                # Render battery in the red layer only — appears red on the
+                # B panel, signalling low charge as an accent (never a
+                # background).
+                red_draw.text((bat_x, bat_y), battery_text, font=font_ui, fill=0)
+            else:
+                draw.text((bat_x, bat_y), battery_text, font=font_ui, fill=0)
 
         # 4. Main Content (Face + Bubble)
         
