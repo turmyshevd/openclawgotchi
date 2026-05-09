@@ -157,6 +157,20 @@ def render_ui(mood="happy", status_text="", fast_mode=True):
         WIDTH, HEIGHT = 250, 122
         image = Image.new('1', (WIDTH, HEIGHT), 255)
         draw = ImageDraw.Draw(image)
+
+        # Best-effort battery probe — returns None when no UPS HAT or I2C off.
+        # Always rendered black in the stats line; a future B-variant display
+        # PR can repaint the suffix red when battery_low is set.
+        battery_text = ""
+        battery_low = False
+        try:
+            from hardware import battery as _battery
+            _b = _battery.read()
+            if _b is not None:
+                battery_text = _b.short()        # "🔋 87% / 4.09V"
+                battery_low = _b.percentage < 20
+        except Exception:
+            pass
         
         # --- FONTS ---
         try:
@@ -261,8 +275,10 @@ def render_ui(mood="happy", status_text="", fast_mode=True):
         draw.text((2, 1), display_name, font=font_ui, fill=0)
         
         # Right: Stats (Formatted clearly)
-        # e.g. T:45C | Free:120M | 14:00
+        # e.g. T:45C | Free:120M | 14:00 [| 🔋87%/4.09V]
         txt_stats = f"T:{stats['temp']}°C | Free:{stats['mem_avail']}MB | {now}"
+        if battery_text:
+            txt_stats += f" | {battery_text}"
         bbox = draw.textbbox((0, 0), txt_stats, font=font_ui)
         w = bbox[2] - bbox[0]
         draw.text((WIDTH - w - 2, 1), txt_stats, font=font_ui, fill=0)
