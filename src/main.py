@@ -31,7 +31,7 @@ from hardware.display import boot_screen, online_screen, show_face
 from bot.handlers import (
     cmd_start, cmd_clear, cmd_context, cmd_status, cmd_xp, cmd_pro, cmd_use,
     cmd_remember, cmd_recall, cmd_vault, cmd_cron, cmd_jobs, cmd_memory, cmd_health,
-    cmd_model, cb_model, cmd_update, cmd_battery, cmd_rag, handle_message, handle_voice
+    cmd_model, cb_model, cmd_update, cmd_battery, cmd_rag, cmd_quiet, handle_message, handle_voice
 )
 from bot.heartbeat import send_heartbeat
 from hooks.runner import run_hook, HookEvent, discover_and_load_hooks
@@ -220,6 +220,7 @@ def main():
             BotCommand("context", "View/trim context window"),
             BotCommand("mode", "Toggle Lite/Pro mode"),
             BotCommand("model", "Switch LLM model (gemini/glm/ollama)"),
+            BotCommand("quiet", "Time-of-day verbosity schedule"),
             BotCommand("xp", "XP rules & progress"),
             BotCommand("remember", "Save fact: /remember cat fact"),
             BotCommand("recall", "Search memory: /recall query"),
@@ -283,6 +284,7 @@ def main():
     app.add_handler(CommandHandler("health", cmd_health))
     app.add_handler(CommandHandler("update", cmd_update))
     app.add_handler(CommandHandler("battery", cmd_battery))
+    app.add_handler(CommandHandler("quiet", cmd_quiet))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), handle_message))
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
 

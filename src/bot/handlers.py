@@ -1284,6 +1284,79 @@ async def cmd_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.edit_text(f"❌ Update error: `{e}`", parse_mode="Markdown")
 
 
+async def cmd_quiet(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Manage the time-of-day quiet schedule.
+
+    Usage:
+      /quiet                          show current schedule + ASCII bar
+      /quiet now                      show current verbosity level
+      /quiet add <from> <to> <0..3>   add/replace a span (HH:MM)
+      /quiet reset                    restore the default schedule
+
+    Verbosity levels: 0=silent, 1=quiet, 2=normal, 3=chatty.
+    Spans must use 24h HH:MM (use 24:00 to denote end-of-day).
+    """
+    if not is_allowed(update.effective_user.id, update.effective_chat.id):
+        return
+
+    from utils.timing import (
+        load_schedule, reset_schedule, add_span, current_verbosity, render_schedule,
+        SILENT, QUIET, NORMAL, CHATTY,
+    )
+
+    args = list(context.args or [])
+    if not args:
+        bar = render_schedule()
+        v = current_verbosity()
+        names = {SILENT: "silent", QUIET: "quiet", NORMAL: "normal", CHATTY: "chatty"}
+        await update.message.reply_text(
+            f"🌙 *Quiet schedule*\n\n```\n{bar}\n```\n"
+            f"*Now:* `{names.get(v, '?')}` (v={v})\n\n"
+            "Edit:  `/quiet add HH:MM HH:MM 0..3`\n"
+            "Reset: `/quiet reset`\n"
+            "_Levels: 0=silent, 1=quiet, 2=normal, 3=chatty_",
+            parse_mode="Markdown",
+        )
+        return
+
+    sub = args[0].lower()
+    if sub == "now":
+        v = current_verbosity()
+        names = {SILENT: "silent", QUIET: "quiet", NORMAL: "normal", CHATTY: "chatty"}
+        await update.message.reply_text(f"🌙 Current: *{names.get(v, '?')}* (v={v})", parse_mode="Markdown")
+        return
+
+    if sub == "reset":
+        reset_schedule()
+        await update.message.reply_text("✅ Schedule reset to defaults.\n```\n" + render_schedule() + "\n```", parse_mode="Markdown")
+        return
+
+    if sub == "add" and len(args) >= 4:
+        try:
+            verb = int(args[3])
+        except ValueError:
+            await update.message.reply_text("❌ Verbosity must be an integer 0..3.")
+            return
+        ok, msg = add_span(args[1], args[2], verb)
+        if not ok:
+            await update.message.reply_text(f"❌ {msg}")
+            return
+        await update.message.reply_text(
+            f"✅ {msg}\n\n```\n{render_schedule()}\n```",
+            parse_mode="Markdown",
+        )
+        return
+
+    await update.message.reply_text(
+        "Usage:\n"
+        "`/quiet`\n"
+        "`/quiet now`\n"
+        "`/quiet add HH:MM HH:MM 0..3`\n"
+        "`/quiet reset`",
+        parse_mode="Markdown",
+    )
+
+
 async def cmd_battery(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /battery command — show UPS HAT (C) status."""
     if not is_allowed(update.effective_user.id, update.effective_chat.id):

@@ -11,6 +11,32 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 USER="$(whoami)"
 ENV_FILE="${SCRIPT_DIR}/.env"
 
+# Helper: ensure system timezone is correct and NTP sync is on. The bot
+# stamps every persisted message and respects a quiet schedule based on
+# local wall-clock time, so getting this right at install time avoids
+# 4-hour-off heartbeats on a freshly-flashed Pi. Defaults to Europe/Berlin
+# (matches the project's German developer base); set ``OCG_TIMEZONE`` in
+# the environment before running setup to override.
+configure_time() {
+    local tz="${OCG_TIMEZONE:-Europe/Berlin}"
+    local current
+    current=$(timedatectl show --property=Timezone --value 2>/dev/null || echo "")
+    if [ "$current" = "$tz" ]; then
+        echo "  ✅ Timezone already $tz"
+    else
+        echo "  🕒 Setting timezone to $tz"
+        sudo timedatectl set-timezone "$tz" 2>/dev/null || \
+            echo "  ⚠️  Could not set timezone (run 'sudo timedatectl set-timezone $tz' manually)"
+    fi
+    sudo timedatectl set-ntp true 2>/dev/null || true
+    if timedatectl show --property=NTPSynchronized --value 2>/dev/null | grep -q "yes"; then
+        echo "  ✅ NTP synchronized"
+    else
+        echo "  ℹ️  NTP not synchronized yet (DietPi sync mechanism may take a minute)"
+    fi
+}
+
+
 # Helper: ensure OLLAMA_API_BASE in $ENV_FILE points at the user's actual
 # Ollama host (or is left empty / commented). The repo ships a placeholder
 # default in src/config.py so the import never crashes — but on a real
@@ -78,6 +104,7 @@ if [ -f "$ENV_FILE" ]; then
     fi
     # Always offer to fix the Ollama base if it's still on the placeholder —
     # missing or default value only, otherwise quiet.
+    configure_time
     configure_ollama_base
 else
     echo "  Creating .env from template..."
@@ -131,6 +158,7 @@ else
 
     # Ollama base (optional, but ask up-front so /model → ollama doesn't
     # silently fail with the http://ollama-server:11434 placeholder).
+    configure_time
     configure_ollama_base
 
     echo ""

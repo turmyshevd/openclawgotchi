@@ -146,11 +146,27 @@ async def send_heartbeat(context):
     """
     Periodic heartbeat: auto-mood, XP, mail check, reflect.
     Called every 4 hours.
+
+    Respects the user's quiet schedule (utils.timing): when
+    ``current_verbosity()`` is SILENT, the heartbeat returns early
+    without doing autonomous output. Critical states (e.g. an OOM-class
+    auto-mood) still update the display so the warning isn't muted —
+    only the chatty side-effects (mail, summaries, reflection prompt)
+    are skipped.
     """
+    from utils.timing import current_verbosity, SILENT
+    verbosity = current_verbosity()
+
     run_hook(HookEvent(event_type="heartbeat", action="start"))
 
-    # 1. Apply auto-mood first
+    # 1. Apply auto-mood first — keep this even at SILENT so a critical
+    #    state (OOM!, OVERHEATING!) still surfaces on the display.
     mood, mood_text = apply_auto_mood()
+
+    if verbosity == SILENT:
+        log.info(f"Heartbeat skipped — quiet schedule says SILENT (mood={mood}, text={mood_text!r})")
+        run_hook(HookEvent(event_type="heartbeat", action="silent_skip"))
+        return
 
     # 2. Award heartbeat XP
     on_heartbeat()
