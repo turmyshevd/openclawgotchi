@@ -294,6 +294,21 @@ async def send_heartbeat(context):
         prompt += "\nThink about something DIFFERENT this time.\n"
 
     prompt += "\n\n[Reflect. Think out loud. Then FACE: and SAY:]"
+
+    # The HEARTBEAT.md template is English; without a final language pin
+    # the model defaults to English even when BOT_LANGUAGE is set, because
+    # the long English user prompt overpowers the system-level directive.
+    # Reinforce the pin here so the reflection itself follows BOT_LANGUAGE.
+    from config import BOT_LANGUAGE
+    _LANG_NAMES = {
+        "de": "Deutsch", "en": "English", "ru": "Русский", "es": "Español",
+        "fr": "Français", "it": "Italiano", "pt": "Português", "nl": "Nederlands",
+        "pl": "Polski", "tr": "Türkçe", "ja": "日本語", "zh": "中文", "ko": "한국어",
+    }
+    _lang_code = (BOT_LANGUAGE or "").strip().lower()
+    if _lang_code and _lang_code != "en":
+        _lang_name = _LANG_NAMES.get(_lang_code, _lang_code)
+        prompt += f"\n\nIMPORTANT: write the reflection text and the SAY: bubble in **{_lang_name}**, not English. The template above is English only because it's a system instruction — your output must be in {_lang_name}."
     
     # 7. Call LLM
     router = get_router()
