@@ -106,7 +106,11 @@ def update_display(mood: str = None, text: str = None, full_refresh: bool = Fals
     # modern kernel renders inverted colors.
     propagate_env = {
         k: v for k, v in os.environ.items()
-        if k in ("OCG_DISPLAY_VARIANT", "GPIOZERO_PIN_FACTORY", "OCG_UPS_BUS", "OCG_UPS_ADDR")
+        if k in (
+            "OCG_DISPLAY_VARIANT", "GPIOZERO_PIN_FACTORY",
+            "OCG_UPS_BUS", "OCG_UPS_ADDR",
+            "BOT_NAME", "OWNER_NAME", "BOT_LANGUAGE",
+        )
     }
     cmd = ["sudo", "/usr/bin/env"]
     cmd.extend(f"{k}={v}" for k, v in propagate_env.items())

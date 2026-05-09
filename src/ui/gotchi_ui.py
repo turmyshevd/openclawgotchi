@@ -306,29 +306,13 @@ def render_ui(mood="happy", status_text="", fast_mode=True):
         draw.text((2, 1), display_name, font=font_ui, fill=0)
         
         # Right: Stats (Formatted clearly)
-        # e.g. T:45C | Free:120M | 14:00 [| 🔋87%]
-        # The battery suffix renders as RED text on the B variant when low,
-        # otherwise black like the rest. Red is an accent only — never the
-        # background — so a healthy battery looks identical to the legacy
-        # display.
+        # e.g. T:45C | Free:120M | 14:00
+        # Battery info is rendered separately in the footer (not here) so the
+        # bot name on the left isn't pushed off-screen by long stats lines.
         txt_stats = f"T:{stats['temp']}°C | Free:{stats['mem_avail']}MB | {now}"
-        battery_suffix = f" | {battery_text}" if battery_text else ""
-        full_stats = txt_stats + battery_suffix
-        bbox = draw.textbbox((0, 0), full_stats, font=font_ui)
+        bbox = draw.textbbox((0, 0), txt_stats, font=font_ui)
         w = bbox[2] - bbox[0]
-        stats_x = WIDTH - w - 2
-
-        if battery_suffix and red_draw is not None and battery_low:
-            # Split: prefix in black layer, battery suffix in red layer only.
-            # Result on B panel: prefix renders black, suffix renders red.
-            bbox_pre = draw.textbbox((0, 0), txt_stats, font=font_ui)
-            pre_w = bbox_pre[2] - bbox_pre[0]
-            draw.text((stats_x, 1), txt_stats, font=font_ui, fill=0)
-            red_draw.text((stats_x + pre_w, 1), battery_suffix, font=font_ui, fill=0)
-        else:
-            # Mono variant, healthy battery, or no battery present:
-            # one black draw call, no red layer touched.
-            draw.text((stats_x, 1), full_stats, font=font_ui, fill=0)
+        draw.text((WIDTH - w - 2, 1), txt_stats, font=font_ui, fill=0)
         
         # Line
         draw.line((0, HEADER_H, WIDTH, HEADER_H), fill=0)
@@ -370,12 +354,31 @@ def render_ui(mood="happy", status_text="", fast_mode=True):
         except Exception:
             xp_str = ""
         
-        # Draw status on left, XP on right
-        draw.text((4, HEIGHT - FOOTER_H + 1), status_text[:35], font=font_ui, fill=0)
+        # Footer layout: status (left) | battery (centre) | XP (right).
+        # The battery cell lives in the footer rather than the header so the
+        # bot name on the top-left has room and the panel can show all three
+        # at once. On the B variant we render the battery suffix into the
+        # red layer when battery_low — otherwise normal black ink.
+        draw.text((4, HEIGHT - FOOTER_H + 1), status_text[:30], font=font_ui, fill=0)
+
+        xp_w = 0
         if xp_str:
             bbox_xp = draw.textbbox((0, 0), xp_str, font=font_ui)
             xp_w = bbox_xp[2] - bbox_xp[0]
             draw.text((WIDTH - xp_w - 4, HEIGHT - FOOTER_H + 1), xp_str, font=font_ui, fill=0)
+
+        if battery_text:
+            bbox_bat = draw.textbbox((0, 0), battery_text, font=font_ui)
+            bat_w = bbox_bat[2] - bbox_bat[0]
+            bat_x = (WIDTH - bat_w) // 2
+            bat_y = HEIGHT - FOOTER_H + 1
+            if red_draw is not None and battery_low:
+                # Render battery in the red layer only — appears red on the
+                # B panel, signalling low charge as an accent (never a
+                # background).
+                red_draw.text((bat_x, bat_y), battery_text, font=font_ui, fill=0)
+            else:
+                draw.text((bat_x, bat_y), battery_text, font=font_ui, fill=0)
 
         # 4. Main Content (Face + Bubble)
         
