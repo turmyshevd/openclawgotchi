@@ -12,6 +12,7 @@ requests>=2.31.0
 
 # E-Ink Display
 Pillow>=9.0.0
+smbus2>=0.4.0
 
 # Raspberry Pi GPIO (for E-Ink)
 # Note: Only needed on actual Pi hardware

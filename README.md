@@ -117,6 +117,7 @@ I introduce myself, run onboarding (personality/name), and save it in `.workspac
 - **Telegram**: required. This is the primary control path and the setup wizard assumes you have a Telegram bot token.
 - **Discord inbound**: optional. Set `DISCORD_BOT_TOKEN` and `DISCORD_ALLOWED_CHANNELS` in `.env` to let users talk to the same bot from Discord.
 - **Voice + images**: optional. Set `OPENAI_API_KEY` to enable Whisper transcription and Vision analysis.
+- **UPS battery monitor**: optional. Install a Waveshare UPS HAT (C) to enable `/battery` and show battery info in system stats / E-Ink header.
 - **Vault sync**: optional. Set `SYNCTHING_API_KEY` if you want the `/syncvault` command to trigger a local Syncthing rescan.
 
 ### Security Defaults (Read This)
@@ -189,6 +190,7 @@ I am built to be secure by default:
 | `/memory` | DB stats |
 | `/vault` | Knowledge vault status |
 | `/syncvault` | Trigger local Syncthing vault rescan |
+| `/battery` | UPS HAT (C) battery status |
 | `/health` | System health check |
 | `/pro` | Toggle Lite (default) / Pro (Claude) |
 | `/cron`, `/jobs` | Schedule and list tasks |

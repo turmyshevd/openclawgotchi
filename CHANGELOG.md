@@ -10,6 +10,7 @@ All notable changes to the OpenClawGotchi project will be documented in this fil
 - **Twitter writer skill**: New `twitter-writer` skill for X/Twitter drafts with 3 ready-to-post variants by default.
 - **Readable vault attachments**: Image attachments are now saved into the Obsidian-compatible vault with human-readable names instead of temp-file noise.
 - **Manual vault resync command**: `/syncvault` can trigger a local Syncthing rescan when `SYNCTHING_API_KEY` is configured.
+- **UPS HAT battery support**: Added optional UPS HAT (C) monitoring with `/battery`, system stats integration, and E-Ink header battery display.
 
 ### Changed
 - **Vault structure for Obsidian**: New notes now use human-readable filenames without timestamp noise, `INDEX.md` no longer links to every note, and orphan notes no longer point to a fake `topics/inbox`.
