@@ -1470,6 +1470,45 @@ def _build_tool_footer(actions: list[str]) -> str:
 
 
 # ============================================================
+# ACTIVE MODEL PERSISTENCE
+# ============================================================
+# /model and /use write the chosen preset to data/active_model.json,
+# which is gitignored and lives on the device only. Survives restart,
+# reboot, and `git pull` (auto_update.sh tarballs data/ pre-pull).
+# When the user picks Ollama with a private LAN IP as api_base, that
+# IP stays on the device — it never leaks into the repo.
+
+_ACTIVE_MODEL_FILE = None  # lazily resolved to avoid import-time cost
+
+
+def _active_model_path() -> Path:
+    global _ACTIVE_MODEL_FILE
+    if _ACTIVE_MODEL_FILE is None:
+        from config import DATA_DIR
+        _ACTIVE_MODEL_FILE = DATA_DIR / "active_model.json"
+    return _ACTIVE_MODEL_FILE
+
+
+def _load_active_model() -> Optional[dict]:
+    try:
+        p = _active_model_path()
+        if p.exists():
+            return json.loads(p.read_text())
+    except Exception as e:
+        log.warning(f"Could not load active_model.json: {e}")
+    return None
+
+
+def _save_active_model(model: str, api_base: Optional[str]) -> None:
+    try:
+        p = _active_model_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({"model": model, "api_base": api_base}, indent=2))
+    except Exception as e:
+        log.warning(f"Could not save active_model.json: {e}")
+
+
+# ============================================================
 # CONNECTOR
 # ============================================================
 
@@ -1477,7 +1516,7 @@ class LiteLLMConnector(LLMConnector):
     """LiteLLM connector with tools."""
     
     name = "litellm"
-    
+
     def __init__(self, model: str = None, api_base: str = None):
         from config import DEFAULT_LITE_PRESET, LLM_PRESETS, GEMINI_API_BASE
         if model is not None:
@@ -1487,11 +1526,22 @@ class LiteLLMConnector(LLMConnector):
             preset = LLM_PRESETS.get(DEFAULT_LITE_PRESET, LLM_PRESETS["glm"])
             self.model = preset["model"]
             self.api_base = preset.get("api_base") or GEMINI_API_BASE or None
+            # Restore the user's last persisted /model or /use pick. Survives
+            # systemd restart, reboot, and `git pull` (the file is gitignored
+            # and tarballed by scripts/auto_update.sh). When the file holds an
+            # ollama choice with an api_base (e.g. a private LAN IP), the IP
+            # stays on the device — never in the repo.
+            saved = _load_active_model()
+            if saved and saved.get("model"):
+                self.model = saved["model"]
+                if saved.get("api_base"):
+                    self.api_base = saved["api_base"]
 
     def set_model(self, model: str, api_base: str = None):
-        """Dynamically switch model and api_base."""
+        """Dynamically switch model and api_base. Persists to data/active_model.json."""
         self.model = model
         self.api_base = api_base
+        _save_active_model(model, api_base)
     
     def is_available(self) -> bool:
         return LITELLM_AVAILABLE
