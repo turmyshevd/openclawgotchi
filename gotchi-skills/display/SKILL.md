@@ -74,9 +74,19 @@ Custom faces from `data/custom_faces.json` are merged with defaults on each rend
 ## Display Info
 
 - **Size:** 250x122 pixels
-- **Colors:** Black & white only
-- **Refresh:** ~2-3 seconds
-- **Ghosting:** Use `--full` to clear
+- **Variants:** two physical panels share the same code path (selected via `OCG_DISPLAY_VARIANT`):
+  - `mono` (default, `epd2in13_V4`): 2-color **black & white**, fast (~2 s) refresh, supports partial updates so face changes feel snappy.
+  - `b` (`epd2in13b_V4`): 3-color **black + red + white**, full refresh only (~15-20 s per update). The red plane is reserved for system-initiated warning accents — see "Color rule" below.
+- **Refresh:** ~2-3 s mono, ~15-20 s on B variant
+- **Ghosting:** Use `--full` to clear (mono only — B always full-refreshes)
+
+## Color rule (B variant)
+
+You **cannot** emit a "make this red" command — there is no `RED:` directive in the FACE/SAY/DISPLAY protocol. Red usage is decided by the bot's runtime code, not the LLM.
+
+When you DO see something rendered red on a B-variant panel, it means a system-level **warning** is active (today: low battery, < 20 %). Treat red as a hint to the user, not as an aesthetic.
+
+If you ever extend the protocol with an explicit red channel (e.g. a future `WARN:` directive), the rule remains: **red is an accent, never a background**. Never instruct the bot to "fill the screen red" or "make everything red" — that defeats the warning channel and looks broken.
 
 ## Do not
 
