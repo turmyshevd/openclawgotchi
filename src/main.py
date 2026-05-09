@@ -219,6 +219,7 @@ def main():
             BotCommand("vault", "Knowledge vault status"),
             BotCommand("context", "View/trim context window"),
             BotCommand("mode", "Toggle Lite/Pro mode"),
+            BotCommand("model", "Switch LLM model (gemini/glm/ollama)"),
             BotCommand("xp", "XP rules & progress"),
             BotCommand("remember", "Save fact: /remember cat fact"),
             BotCommand("recall", "Search memory: /recall query"),

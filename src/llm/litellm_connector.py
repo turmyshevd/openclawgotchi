@@ -1242,6 +1242,45 @@ def _build_tool_footer(actions: list[str]) -> str:
 
 
 # ============================================================
+# ACTIVE MODEL PERSISTENCE
+# ============================================================
+# /model and /use write the chosen preset to data/active_model.json,
+# which is gitignored and lives on the device only. Survives restart,
+# reboot, and `git pull` (auto_update.sh tarballs data/ pre-pull).
+# When the user picks Ollama with a private LAN IP as api_base, that
+# IP stays on the device — it never leaks into the repo.
+
+_ACTIVE_MODEL_FILE = None  # lazily resolved to avoid import-time cost
+
+
+def _active_model_path() -> Path:
+    global _ACTIVE_MODEL_FILE
+    if _ACTIVE_MODEL_FILE is None:
+        from config import DATA_DIR
+        _ACTIVE_MODEL_FILE = DATA_DIR / "active_model.json"
+    return _ACTIVE_MODEL_FILE
+
+
+def _load_active_model() -> Optional[dict]:
+    try:
+        p = _active_model_path()
+        if p.exists():
+            return json.loads(p.read_text())
+    except Exception as e:
+        log.warning(f"Could not load active_model.json: {e}")
+    return None
+
+
+def _save_active_model(model: str, api_base: Optional[str]) -> None:
+    try:
+        p = _active_model_path()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({"model": model, "api_base": api_base}, indent=2))
+    except Exception as e:
+        log.warning(f"Could not save active_model.json: {e}")
+
+
+# ============================================================
 # CONNECTOR
 # ============================================================
 
@@ -1286,7 +1325,7 @@ class LiteLLMConnector(LLMConnector):
             self.model = model
             self.api_base = api_base
         else:
-            # Persisted choice from /model (survives restart) takes priority
+            # Persisted choice from /model (survives restart) takes priority.
             saved = _load_active_model()
             if saved and saved.get("model"):
                 self.model = saved["model"]
