@@ -63,6 +63,63 @@ python3 src/main.py
 3. Describe what you changed and why
 4. Keep PRs focused on one thing
 
+#### Scope
+
+OpenClawGotchi has a few highly-coupled files, especially:
+
+- `src/bot/handlers.py`
+- `src/main.py`
+- `src/config.py`
+- `setup.sh`
+- `requirements.txt`
+- `README.md`
+- `templates/BOT_INSTRUCTIONS.md`
+
+Because of that, contributors should prefer **small, isolated PRs**.
+
+Good PRs:
+
+- one feature or one fix
+- one hardware topic at a time
+- one transport topic at a time (Telegram or Discord)
+- docs that describe behavior implemented in the same PR
+
+Avoid:
+
+- large "sync my whole branch" PRs
+- mixing unrelated features in one PR
+- docs/changelog updates for features that are not actually merged
+- stale branches that accidentally revert recent `main` work
+
+#### Before Opening a PR
+
+1. Rebase or merge the latest `main`
+2. Make sure your branch does not undo recent work in core files
+3. Run syntax checks for touched Python files
+4. If you changed setup, env vars, commands, media flows, or hardware support, update:
+   - `.env.example`
+   - `README.md`
+   - `setup.sh` if install/runtime behavior changed
+
+#### Maintainer Outcomes
+
+Maintainers may choose one of four outcomes:
+
+- **Merge as-is**: for small, clean, isolated PRs
+- **Request changes**: if the implementation is close but not ready
+- **Manual integration**: if the idea is good but the branch is stale or conflicts with current release work
+- **Close**: if the change is already integrated another way, duplicated, or out of scope
+
+Manual integration is normal in this repo. It means the maintainer accepted the idea/code but had to transplant it safely onto the current `main`.
+
+#### Hardware and Transport Notes
+
+- Hardware features must degrade gracefully when the hardware is absent
+- Optional dependencies should be explicit
+- Telegram is the primary control plane
+- Discord is optional and should not break Telegram behavior
+- If a PR changes onboarding, auth, media handling, or setup, say clearly whether it affects Telegram, Discord, or both
+
 ## What to Contribute
 
 ### Good First Issues
@@ -91,6 +148,13 @@ sudo python3 src/ui/gotchi_ui.py --mood happy --text "Test"
 python3 src/main.py
 # Send messages via Telegram
 ```
+
+If relevant, also test:
+
+- Discord inbound startup when `DISCORD_BOT_TOKEN` is set
+- voice transcription when `OPENAI_API_KEY` is set
+- image/photo handling when Vision is enabled
+- setup flow if you changed `setup.sh`
 
 ### Check Memory Usage
 
