@@ -5,6 +5,7 @@ LiteLLM connector — full-featured fallback with tools.
 import contextvars
 import json
 import logging
+import os
 import shlex
 import subprocess
 from pathlib import Path
@@ -604,6 +605,105 @@ def remove_scheduled_task(job_id: str) -> str:
         return f"Error: {e}"
 
 
+def query_rag(query: str, top_k: int = 5) -> str:
+    """Search the configured RAG vault for snippets relevant to `query`.
+
+    The RAG service is a long-term, Markdown-first memory backend reachable
+    via REST (see RAG_REST_URL env var and src/llm/rag_client.py for the API
+    contract). Use this to ground answers in the user's notes before falling
+    back to general knowledge. Returns a formatted list of top hits with
+    file path, score and chunk text. When RAG is not configured
+    (RAG_REST_URL empty) returns a clear hint instead of failing.
+    """
+    from llm import rag_client
+    from config import RAG_REST_URL
+    if not rag_client.is_configured():
+        return "RAG not configured (set RAG_REST_URL in .env). Falling back to in-bot memory."
+    if not query or not query.strip():
+        return "Error: query is empty"
+    response = rag_client.query(query, top_k=top_k)
+    if response is None:
+        return f"Error: RAG service unreachable at {RAG_REST_URL or '?'}"
+    return rag_client.format_hits(response)
+
+
+def persist_to_rag(text: str, title: str = "", tags: str = "") -> str:
+    """Save a markdown note / reflection to the configured RAG vault.
+
+    Use sparingly — only for content worth recalling later (decisions,
+    preferences, project context). Casual chat does NOT belong here.
+    `tags` is a comma-separated string for ergonomics.
+    """
+    from llm import rag_client
+    from config import RAG_REST_URL
+    if not rag_client.is_configured():
+        return "RAG not configured (set RAG_REST_URL in .env)."
+    if not text or len(text.strip()) < 10:
+        return "Error: text too short to be worth persisting (min 10 chars)"
+    tag_list = [t.strip() for t in (tags or "").split(",") if t.strip()] or None
+    response = rag_client.persist(text, title=title or None, tags=tag_list)
+    if response is None:
+        return f"Error: RAG service unreachable at {RAG_REST_URL or '?'}"
+    return f"Persisted to vault. Server: {str(response)[:200]}"
+
+
+def mcp_list_tools() -> str:
+    """List the tools advertised by the configured MCP server.
+
+    Activates when ``RAG_MCP_URL`` is set in the environment (or the
+    legacy ``RAG_API_URL`` + ``RAG_TRANSPORT=mcp`` combo). Useful for
+    the LLM to discover what's available before calling
+    ``mcp_call_tool``. Returns a compact rendered list with name +
+    description so the LLM picks the right tool without needing the
+    full JSON Schema.
+    """
+    from llm import rag_mcp_client
+    if not rag_mcp_client.is_enabled():
+        return "MCP transport not enabled (set RAG_MCP_URL in .env)."
+    client = rag_mcp_client.get_client()
+    if client is None:
+        return "MCP client unavailable (server unreachable or not configured)."
+    try:
+        tools = client.list_tools()
+    except Exception as e:
+        return f"MCP list_tools failed: {e}"
+    if not tools:
+        return "(no tools advertised by the MCP server)"
+    out = [f"{len(tools)} MCP tool(s) available:"]
+    for t in tools:
+        name = t.get("name", "?")
+        desc = (t.get("description") or "").split("\n")[0][:120]
+        out.append(f"  - {name}: {desc}")
+    return "\n".join(out)
+
+
+def mcp_call_tool(name: str, arguments: str = "{}") -> str:
+    """Invoke a tool on the configured MCP server by name.
+
+    ``arguments`` is a JSON string (the LLM emits one). Returns the
+    server's response, flattened to readable text. Activates when
+    ``RAG_MCP_URL`` is set. Use ``mcp_list_tools`` first to see
+    what's available.
+    """
+    from llm import rag_mcp_client
+    if not rag_mcp_client.is_enabled():
+        return "MCP transport not enabled (set RAG_MCP_URL in .env)."
+    client = rag_mcp_client.get_client()
+    if client is None:
+        return "MCP client unavailable."
+    try:
+        args = json.loads(arguments) if arguments else {}
+        if not isinstance(args, dict):
+            return "Error: arguments must be a JSON object"
+    except json.JSONDecodeError as e:
+        return f"Error: invalid arguments JSON: {e}"
+    try:
+        result = client.call_tool(name, args)
+    except Exception as e:
+        return f"MCP call_tool({name}) failed: {e}"
+    return rag_mcp_client.extract_text_content(result)[:4000]
+
+
 def health_check() -> str:
     """
     Run system health check. Use this to diagnose problems!
@@ -1054,6 +1154,36 @@ TOOLS = [
         }, "required": ["query"]}
     }},
     {"type": "function", "function": {
+        "name": "query_rag",
+        "description": "Search the configured RAG vault — long-term, Markdown-first memory hosted on a separate service. Use BEFORE answering questions about user notes / projects / past decisions, to ground replies in real content rather than hallucinate. Returns top hits with file path + excerpt + score. Disabled when RAG_REST_URL is not set.",
+        "parameters": {"type": "object", "properties": {
+            "query": {"type": "string", "description": "Natural-language search query"},
+            "top_k": {"type": "integer", "description": "How many hits to return (default 5, max 50)"}
+        }, "required": ["query"]}
+    }},
+    {"type": "function", "function": {
+        "name": "persist_to_rag",
+        "description": "Save a markdown note / reflection to the configured RAG vault for future recall. Use SPARINGLY — only for content worth recalling later (decisions, preferences, project context). Do NOT persist casual chat. Disabled when RAG_REST_URL is not set.",
+        "parameters": {"type": "object", "properties": {
+            "text": {"type": "string", "description": "Markdown body of the note (10+ chars)"},
+            "title": {"type": "string", "description": "Optional short title"},
+            "tags": {"type": "string", "description": "Optional comma-separated tags"}
+        }, "required": ["text"]}
+    }},
+    {"type": "function", "function": {
+        "name": "mcp_list_tools",
+        "description": "List the tools advertised by the configured MCP server (RAG_MCP_URL). Use BEFORE mcp_call_tool to discover what's available. Disabled when RAG_MCP_URL is not set.",
+        "parameters": {"type": "object", "properties": {}, "required": []}
+    }},
+    {"type": "function", "function": {
+        "name": "mcp_call_tool",
+        "description": "Invoke a tool on the configured MCP server by name. Use mcp_list_tools first. `arguments` is a JSON object encoded as a string. Disabled when RAG_MCP_URL is not set.",
+        "parameters": {"type": "object", "properties": {
+            "name": {"type": "string", "description": "Tool name as advertised by the server"},
+            "arguments": {"type": "string", "description": "JSON object literal as a string, e.g. '{\"query\":\"hello\",\"top_k\":3}'"}
+        }, "required": ["name"]}
+    }},
+    {"type": "function", "function": {
         "name": "add_custom_face",
         "description": "Add a custom face to data/custom_faces.json. After adding, the face becomes available immediately. ALWAYS output FACE: <name> and SAY: <short text> in your FINAL reply to the user so they see the new face on the E-Ink display.",
         "parameters": {"type": "object", "properties": {
@@ -1114,6 +1244,10 @@ TOOL_MAP = {
     "vault_read": vault_read,
     "vault_list": vault_list,
     "vault_search": vault_search,
+    "query_rag": query_rag,
+    "persist_to_rag": persist_to_rag,
+    "mcp_list_tools": mcp_list_tools,
+    "mcp_call_tool": mcp_call_tool,
 }
 
 
@@ -1146,7 +1280,101 @@ _TOOL_ICONS = {
     "vault_read": "📘",
     "vault_list": "📂",
     "vault_search": "🔎",
+    "query_rag": "🧠",
+    "persist_to_rag": "💾",
+    "mcp_list_tools": "🛠",
+    "mcp_call_tool": "🔌",
 }
+
+
+# ============================================================
+# MCP TOOL AUTO-REGISTRATION
+# ============================================================
+# When RAG_MCP_URL is set and the MCP server is reachable, discover
+# its advertised tools at module-init time and register each as a
+# first-class TOOL_MAP entry (with full JSON-Schema). The LLM then
+# calls e.g. ``rag_search(query=..., top_k=3)`` directly instead of
+# the two-hop ``mcp_list_tools`` → ``mcp_call_tool`` indirection.
+# Names that collide with an existing TOOL_MAP entry are skipped.
+# Failures are logged but never crash the bot.
+
+_MCP_REGISTERED_TOOLS: list[str] = []
+
+
+def _make_mcp_tool_wrapper(tool_name: str):
+    """Build a kwargs-based callable that invokes ``tool_name`` over MCP."""
+    def _mcp_tool(**kwargs) -> str:
+        from llm import rag_mcp_client
+        client = rag_mcp_client.get_client()
+        if client is None:
+            return f"MCP unavailable for {tool_name}"
+        try:
+            result = client.call_tool(tool_name, kwargs)
+        except Exception as e:
+            return f"MCP {tool_name} failed: {e}"
+        return rag_mcp_client.extract_text_content(result)[:4000]
+    _mcp_tool.__name__ = tool_name
+    return _mcp_tool
+
+
+def _register_mcp_tools_at_startup() -> int:
+    """Discover MCP tools and add them as first-class TOOL_MAP entries.
+
+    Idempotent: a tool already in TOOL_MAP (collision with a built-in
+    name) is skipped. Returns the number of newly-registered tools.
+    Safe to call multiple times.
+    """
+    from llm import rag_mcp_client
+    if not rag_mcp_client.is_enabled():
+        return 0
+    client = rag_mcp_client.get_client()
+    if client is None:
+        return 0
+    try:
+        tools = client.list_tools()
+    except Exception as e:
+        log.warning(f"MCP auto-registration: list_tools failed: {e}")
+        return 0
+
+    registered = 0
+    for tool in tools:
+        name = tool.get("name")
+        if not name or name in TOOL_MAP:
+            continue
+        desc = (tool.get("description") or name)[:1024]
+        schema = tool.get("inputSchema") or {"type": "object", "properties": {}}
+        TOOLS.append({
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": desc,
+                "parameters": schema,
+            },
+        })
+        TOOL_MAP[name] = _make_mcp_tool_wrapper(name)
+        _TOOL_ICONS.setdefault(name, "🔌")
+        _MCP_REGISTERED_TOOLS.append(name)
+        registered += 1
+
+    if registered:
+        log.info(
+            "MCP auto-registered %d tool(s) as first-class: %s",
+            registered, ", ".join(_MCP_REGISTERED_TOOLS),
+        )
+    return registered
+
+
+# Try at import time. Server unreachable → silent no-op (the existing
+# mcp_list_tools / mcp_call_tool fallback path remains usable).
+try:
+    _register_mcp_tools_at_startup()
+except Exception as _mcp_reg_err:
+    log.warning("MCP auto-registration skipped: %s", _mcp_reg_err)
+
+
+def get_registered_mcp_tools() -> list[str]:
+    """Return names of MCP tools registered as first-class. Used by prompts."""
+    return list(_MCP_REGISTERED_TOOLS)
 
 
 def _format_tool_action(func_name: str, args: dict, result: str) -> str:

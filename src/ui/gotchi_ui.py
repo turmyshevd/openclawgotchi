@@ -39,11 +39,36 @@ FONT_DIR = PROJECT_DIR / "resources/fonts"
 # Add drivers to path
 sys.path.append(str(SRC_DIR / "drivers"))
 
-try:
-    import epd2in13_V4 as epd_driver
-except ImportError:
-    print("Error: EPD driver not found")
-    sys.exit(1)
+# Display variant selection.
+#   OCG_DISPLAY_VARIANT=mono  → epd2in13_V4    (B&W, default, partial refresh)
+#   OCG_DISPLAY_VARIANT=b     → epd2in13b_V4   (3-color, full refresh only)
+#   OCG_DISPLAY_VARIANT=auto  → prefer B if its driver is importable, else mono
+_DISPLAY_VARIANT = os.environ.get("OCG_DISPLAY_VARIANT", "mono").strip().lower()
+EPD_VARIANT_B = False  # set True after successful B-variant import
+
+if _DISPLAY_VARIANT in ("b", "epd2in13b", "3color", "tricolor"):
+    try:
+        import epd2in13b_V4 as epd_driver
+        EPD_VARIANT_B = True
+    except ImportError:
+        print("Error: OCG_DISPLAY_VARIANT=b but epd2in13b_V4 driver not found")
+        sys.exit(1)
+elif _DISPLAY_VARIANT == "auto":
+    try:
+        import epd2in13b_V4 as epd_driver
+        EPD_VARIANT_B = True
+    except ImportError:
+        try:
+            import epd2in13_V4 as epd_driver
+        except ImportError:
+            print("Error: EPD driver not found (tried epd2in13b_V4 and epd2in13_V4)")
+            sys.exit(1)
+else:  # mono / default / unknown
+    try:
+        import epd2in13_V4 as epd_driver
+    except ImportError:
+        print("Error: EPD driver not found")
+        sys.exit(1)
 
 def get_system_stats():
     """Gather system metrics."""
@@ -147,16 +172,36 @@ def render_ui(mood="happy", status_text="", fast_mode=True):
     epd = epd_driver.EPD()
     gpio_released = False
     try:
-        if fast_mode:
-            epd.init()
-        else:
-            epd.init()
-            epd.Clear(0xFF)
+        epd.init()
+        if not fast_mode:
+            # Full clear before drawing.
+            #   mono variant accepts an explicit fill colour; B-variant clears black + red layers internally.
+            if EPD_VARIANT_B:
+                epd.Clear()
+            else:
+                epd.Clear(0xFF)
             
         # Canvas (V4: 122x250 native, logic Horizontal 250x122)
         WIDTH, HEIGHT = 250, 122
         image = Image.new('1', (WIDTH, HEIGHT), 255)
         draw = ImageDraw.Draw(image)
+
+        # B variant: build a parallel "red" image. All-white = no red pixels;
+        # we only paint into it for warning accents (e.g. low battery).
+        red_image = Image.new('1', (WIDTH, HEIGHT), 255) if EPD_VARIANT_B else None
+        red_draw = ImageDraw.Draw(red_image) if red_image is not None else None
+
+        # Best-effort battery probe — returns None when no UPS HAT or I2C off.
+        battery_text = ""
+        battery_low = False
+        try:
+            from hardware import battery as _battery
+            _b = _battery.read()
+            if _b is not None:
+                battery_text = _b.short()        # "🔋 87% / 8.12V"
+                battery_low = _b.percentage < 20  # red accent on B variant only
+        except Exception:
+            pass
         
         # --- FONTS ---
         try:
@@ -262,6 +307,8 @@ def render_ui(mood="happy", status_text="", fast_mode=True):
         
         # Right: Stats (Formatted clearly)
         # e.g. T:45C | Free:120M | 14:00
+        # Battery info is rendered separately in the footer (not here) so the
+        # bot name on the left isn't pushed off-screen by long stats lines.
         txt_stats = f"T:{stats['temp']}°C | Free:{stats['mem_avail']}MB | {now}"
         bbox = draw.textbbox((0, 0), txt_stats, font=font_ui)
         w = bbox[2] - bbox[0]
@@ -307,12 +354,31 @@ def render_ui(mood="happy", status_text="", fast_mode=True):
         except Exception:
             xp_str = ""
         
-        # Draw status on left, XP on right
-        draw.text((4, HEIGHT - FOOTER_H + 1), status_text[:35], font=font_ui, fill=0)
+        # Footer layout: status (left) | battery (centre) | XP (right).
+        # The battery cell lives in the footer rather than the header so the
+        # bot name on the top-left has room and the panel can show all three
+        # at once. On the B variant we render the battery suffix into the
+        # red layer when battery_low — otherwise normal black ink.
+        draw.text((4, HEIGHT - FOOTER_H + 1), status_text[:30], font=font_ui, fill=0)
+
+        xp_w = 0
         if xp_str:
             bbox_xp = draw.textbbox((0, 0), xp_str, font=font_ui)
             xp_w = bbox_xp[2] - bbox_xp[0]
             draw.text((WIDTH - xp_w - 4, HEIGHT - FOOTER_H + 1), xp_str, font=font_ui, fill=0)
+
+        if battery_text:
+            bbox_bat = draw.textbbox((0, 0), battery_text, font=font_ui)
+            bat_w = bbox_bat[2] - bbox_bat[0]
+            bat_x = (WIDTH - bat_w) // 2
+            bat_y = HEIGHT - FOOTER_H + 1
+            if red_draw is not None and battery_low:
+                # Render battery in the red layer only — appears red on the
+                # B panel, signalling low charge as an accent (never a
+                # background).
+                red_draw.text((bat_x, bat_y), battery_text, font=font_ui, fill=0)
+            else:
+                draw.text((bat_x, bat_y), battery_text, font=font_ui, fill=0)
 
         # 4. Main Content (Face + Bubble)
         
@@ -450,13 +516,24 @@ def render_ui(mood="happy", status_text="", fast_mode=True):
         # Rotate 180 degrees if needed
         # image = image.rotate(180) # Uncomment if you want to test rotation
         rotated_image = image.rotate(180)
-        
-        # Update Display (Standard Full only)
-        # Using displayPartBaseImage for fast_mode is safer than display_fast if contrast is issue
-        if fast_mode:
-            epd.displayPartBaseImage(epd.getbuffer(rotated_image))
+        rotated_red = red_image.rotate(180) if red_image is not None else None
+
+        # Update Display
+        #   mono variant: partial-base for fast_mode (no full refresh, lower flicker), full display() otherwise
+        #   B variant: full refresh only (3-color panel). display() takes (black, red); when no warning
+        #              accent was drawn the red layer stays all-white (all-0xFF buffer ⇒ no red pixels)
+        #              and the panel renders pure black-on-white. Red is reserved for warning accents
+        #              (e.g. low-battery suffix), never used as background.
+        if EPD_VARIANT_B:
+            black_buf = epd.getbuffer(rotated_image)
+            red_buf = epd.getbuffer(rotated_red) if rotated_red is not None else \
+                      epd.getbuffer(Image.new("1", rotated_image.size, 255))
+            epd.display(black_buf, red_buf)
         else:
-            epd.display(epd.getbuffer(rotated_image))
+            if fast_mode:
+                epd.displayPartBaseImage(epd.getbuffer(rotated_image))
+            else:
+                epd.display(epd.getbuffer(rotated_image))
 
         epd.sleep()
         gpio_released = True

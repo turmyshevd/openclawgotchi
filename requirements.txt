@@ -14,3 +14,8 @@ Pillow>=9.0.0
 # Note: Only needed on actual Pi hardware
 # RPi.GPIO
 # spidev
+
+# Optional: UPS HAT (C) battery monitoring via INA219 over I2C.
+# `battery.py` gracefully degrades if smbus2 is missing or I2C is disabled,
+# so removing this line just disables the /battery command.
+smbus2>=0.4.0
