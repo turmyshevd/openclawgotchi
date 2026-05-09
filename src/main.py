@@ -271,7 +271,7 @@ def main():
     app.add_handler(CommandHandler("use", cmd_use))
     app.add_handler(CommandHandler("switch", cmd_use))
     app.add_handler(CommandHandler("model", cmd_model))
-    app.add_handler(CallbackQueryHandler(cb_model, pattern=r"^(model|omd):"))
+    app.add_handler(CallbackQueryHandler(cb_model, pattern=r"^(model|omd):|^setollama$"))
     app.add_handler(CommandHandler("remember", cmd_remember))
     app.add_handler(CommandHandler("recall", cmd_recall))
     app.add_handler(CommandHandler("vault", cmd_vault))
