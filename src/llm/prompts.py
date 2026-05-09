@@ -31,6 +31,37 @@ def _language_directive() -> str:
         f"Only switch language if the user clearly writes to you in another language; "
         f"in that case, mirror their language. Never use a third language."
     )
+
+
+def _mcp_memory_directive() -> str:
+    """Tell the bot which external MCP tools are first-class and when to use them.
+
+    Only emitted when at least one MCP tool was successfully auto-registered
+    at startup; otherwise empty so non-MCP deployments stay unchanged.
+    """
+    try:
+        from llm.litellm_connector import get_registered_mcp_tools
+    except Exception:
+        return ""
+    tools = get_registered_mcp_tools()
+    if not tools:
+        return ""
+    bullet_list = ", ".join(f"`{t}`" for t in tools)
+    return (
+        "\n---\n## External Memory (MCP)\n"
+        f"You have first-class access to a long-term RAG memory via these tools: {bullet_list}.\n"
+        "Treat the RAG as your durable memory — your in-process facts and chat history are short-term.\n"
+        "Use it proactively, not just when the user asks:\n"
+        "- BEFORE answering questions about user preferences, project rules, decisions, or past context: "
+        "call `rag_search` (or the equivalent recall tool) to ground your reply in stored knowledge. "
+        "Do not assume from memory alone if a relevant rule might exist.\n"
+        "- WHEN you learn something durable (preferences, decisions, project facts, hard-won lessons): "
+        "call `rag_persist` to save it. Skip casual chat. Prefer short, factual notes with tags.\n"
+        "- If `rag_session_announce` exists, you may announce session context once per conversation "
+        "so the server can route you to the right collections.\n"
+        "Silent rule: if the user later corrects you because you ignored a stored rule, the fault is yours "
+        "for not having searched — search first, answer second."
+    )
 from hardware.system import get_stats_string
 import json
 
@@ -208,6 +239,11 @@ def build_system_context(user_message: str = "") -> str:
     lang = _language_directive()
     if lang:
         parts.append(lang)
+
+    # External MCP memory — only when at least one MCP tool was auto-registered
+    mcp_block = _mcp_memory_directive()
+    if mcp_block:
+        parts.append(mcp_block)
 
     # Add custom faces list if any
     custom_faces = _load_custom_faces_list()
