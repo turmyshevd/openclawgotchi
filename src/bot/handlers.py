@@ -644,7 +644,43 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE, ove
     user_text = override_text or update.message.text
     if not user_text:
         return
-    
+
+    # In-chat config flow: if the user just tapped "Set Ollama IP" on
+    # the /model error screen, their next message is the URL we asked
+    # for. Handle it before the LLM ever sees it.
+    pending = _PENDING_INPUT.get(user.id)
+    if pending == "ollama_base":
+        _PENDING_INPUT.pop(user.id, None)
+        if user_text.strip().lower() in ("cancel", "abbrechen", "stop"):
+            await update.message.reply_text("Cancelled. `OLLAMA_API_BASE` left as-is.", parse_mode="Markdown")
+            return
+        new_base = user_text.strip()
+        # Accept bare host:port — prepend http:// for ergonomics.
+        if not new_base.startswith(("http://", "https://")):
+            new_base = "http://" + new_base
+        # Sanity-check shape: must look like host[:port], no spaces.
+        if " " in new_base or not re.match(r"^https?://[^/\s]+", new_base):
+            await update.message.reply_text(
+                f"❌ That doesn't look like a URL: `{new_base}`\n"
+                "Expected something like `http://192.168.1.42:11434`. "
+                "Try `/model → 🦙 ollama → ⚙️ Set Ollama IP` again.",
+                parse_mode="Markdown",
+            )
+            return
+        try:
+            _set_env_var("OLLAMA_API_BASE", new_base)
+            _update_active_model_api_base(new_base)
+        except Exception as e:
+            await update.message.reply_text(f"❌ Failed to save: {e}")
+            return
+        await update.message.reply_text(
+            f"✅ Saved `OLLAMA_API_BASE={new_base}` to `.env`.\n"
+            "Restarting service in ~1s — I'll be back online shortly.",
+            parse_mode="Markdown",
+        )
+        _trigger_service_restart_async()
+        return
+
     conv_id = chat.id
     sender = get_sender_name(user)
     
@@ -896,6 +932,77 @@ async def cmd_use(update: Update, context: ContextTypes.DEFAULT_TYPE):
 _MODEL_EMOJI = {"gemini": "♊️", "glm": "🇨🇳", "ollama": "🦙"}
 
 
+# --- In-chat config setup (so the user doesn't need SSH + nano just to
+#     fix a missing OLLAMA_API_BASE) ---
+# user_id → kind of input expected on their next text message.
+# Today only "ollama_base" is used, but the dispatch is generic so adding
+# more in-chat config knobs later is just one branch.
+_PENDING_INPUT: dict[int, str] = {}
+
+
+def _env_file_path() -> Path:
+    from config import PROJECT_DIR
+    return PROJECT_DIR / ".env"
+
+
+def _set_env_var(name: str, value: str) -> None:
+    """Set or append ``NAME=VALUE`` in ``.env``. Idempotent.
+
+    .env is gitignored and tarballed by scripts/auto_update.sh, so the
+    value survives ``git pull`` + service restart + auto-rollback. Same
+    persistence guarantees as the rest of the user's secrets.
+    """
+    p = _env_file_path()
+    line_to_write = f"{name}={value}\n"
+    if not p.exists():
+        p.write_text(line_to_write)
+        return
+    content = p.read_text()
+    pattern = re.compile(rf"^{re.escape(name)}=.*$", re.MULTILINE)
+    if pattern.search(content):
+        content = pattern.sub(f"{name}={value}", content)
+    else:
+        if not content.endswith("\n"):
+            content += "\n"
+        content += line_to_write
+    p.write_text(content)
+
+
+def _update_active_model_api_base(value: str) -> None:
+    """If data/active_model.json exists, update its ``api_base`` so the
+    in-process resolver sees the same value as ``.env`` immediately."""
+    import json as _json
+    from config import DATA_DIR
+    p = DATA_DIR / "active_model.json"
+    if not p.exists():
+        return
+    try:
+        d = _json.loads(p.read_text())
+    except Exception:
+        return
+    if not isinstance(d, dict):
+        return
+    d["api_base"] = value
+    p.write_text(_json.dumps(d, indent=2))
+
+
+def _trigger_service_restart_async() -> None:
+    """Fire-and-forget systemctl restart of gotchi-bot.
+
+    Run as a detached subprocess so the bot can finish replying first;
+    by the time the restart kicks in (≈1s), the confirmation message
+    has already left for Telegram. NOPASSWD for ``systemctl restart
+    gotchi-bot`` is wired up in setup.sh's sudoers entry.
+    """
+    import subprocess
+    subprocess.Popen(
+        ["sudo", "-n", "systemctl", "restart", "gotchi-bot.service"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
 # The ``http://ollama-server:11434`` literal that ships in src/config.py
 # and .env.example is a placeholder so the import never crashes; on real
 # hardware it can never resolve. Anywhere it shows up in persisted state
@@ -1018,11 +1125,12 @@ async def cb_model(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(
                 "⚠️ *Ollama host not configured.*\n\n"
                 "`OLLAMA_API_BASE` is unset or still on the placeholder. "
-                "Set it in `.env` to your real Ollama host "
-                "(e.g. `OLLAMA_API_BASE=http://192.168.1.42:11434`) "
-                "and restart the bot.",
+                "Tap below to set it from chat — no SSH needed.",
                 parse_mode="Markdown",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◂ Back", callback_data="model:back")]])
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("⚙️ Set Ollama IP", callback_data="setollama"),
+                    InlineKeyboardButton("◂ Back", callback_data="model:back"),
+                ]])
             )
             return
         router.litellm.set_model(full, resolved)
@@ -1032,6 +1140,21 @@ async def cb_model(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
         show_face(mood="happy", text=f"Ollama: {model_name[:20]}")
+        return
+
+    # In-chat OLLAMA_API_BASE setup — arms _PENDING_INPUT and waits for
+    # the user's next text message in handle_message().
+    if data == "setollama":
+        _PENDING_INPUT[query.from_user.id] = "ollama_base"
+        await query.edit_message_text(
+            "⚙️ *Set Ollama host*\n\n"
+            "Reply with your Ollama base URL — e.g.\n"
+            "`http://192.168.1.42:11434`\n\n"
+            "I'll save it to `.env`, update the running config, and "
+            "restart the service. No SSH needed.\n\n"
+            "_Send `cancel` to abort._",
+            parse_mode="Markdown",
+        )
         return
 
     key = data.split(":", 1)[-1]
@@ -1051,10 +1174,15 @@ async def cb_model(update: Update, context: ContextTypes.DEFAULT_TYPE):
         models = await asyncio.to_thread(_ollama_list_with_capabilities)
 
         if not models:
+            current = _resolve_ollama_base() or OLLAMA_API_BASE
             await query.edit_message_text(
-                f"❌ Could not reach Ollama at `{_resolve_ollama_base() or OLLAMA_API_BASE}`",
+                f"❌ Could not reach Ollama at `{current}`.\n\n"
+                "Wrong host? Tap below to update it from chat.",
                 parse_mode="Markdown",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◂ Back", callback_data="model:back")]])
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("⚙️ Set Ollama IP", callback_data="setollama"),
+                    InlineKeyboardButton("◂ Back", callback_data="model:back"),
+                ]])
             )
             return
 
