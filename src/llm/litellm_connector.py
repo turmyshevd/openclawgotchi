@@ -645,6 +645,62 @@ def persist_to_rag(text: str, title: str = "", tags: str = "") -> str:
     return f"Persisted to vault. Server: {str(response)[:200]}"
 
 
+def mcp_list_tools() -> str:
+    """List the tools advertised by the configured MCP server.
+
+    Activates only when ``RAG_TRANSPORT=mcp`` is set in the environment
+    (the bot's REST RAG path is the default). Useful for the LLM to
+    discover what's available before calling ``mcp_call_tool``. Returns
+    a compact rendered list with name + description so the LLM picks
+    the right tool without needing the full JSON Schema.
+    """
+    from llm import rag_mcp_client
+    if not rag_mcp_client.is_enabled():
+        return "MCP transport not enabled (set RAG_TRANSPORT=mcp + RAG_API_URL pointing at the SSE base)."
+    client = rag_mcp_client.get_client()
+    if client is None:
+        return "MCP client unavailable (server unreachable or not configured)."
+    try:
+        tools = client.list_tools()
+    except Exception as e:
+        return f"MCP list_tools failed: {e}"
+    if not tools:
+        return "(no tools advertised by the MCP server)"
+    out = [f"{len(tools)} MCP tool(s) available:"]
+    for t in tools:
+        name = t.get("name", "?")
+        desc = (t.get("description") or "").split("\n")[0][:120]
+        out.append(f"  - {name}: {desc}")
+    return "\n".join(out)
+
+
+def mcp_call_tool(name: str, arguments: str = "{}") -> str:
+    """Invoke a tool on the configured MCP server by name.
+
+    ``arguments`` is a JSON string (the LLM emits one). Returns the
+    server's response, flattened to readable text. Activates only
+    when ``RAG_TRANSPORT=mcp``. Use ``mcp_list_tools`` first to see
+    what's available.
+    """
+    from llm import rag_mcp_client
+    if not rag_mcp_client.is_enabled():
+        return "MCP transport not enabled (set RAG_TRANSPORT=mcp)."
+    client = rag_mcp_client.get_client()
+    if client is None:
+        return "MCP client unavailable."
+    try:
+        args = json.loads(arguments) if arguments else {}
+        if not isinstance(args, dict):
+            return "Error: arguments must be a JSON object"
+    except json.JSONDecodeError as e:
+        return f"Error: invalid arguments JSON: {e}"
+    try:
+        result = client.call_tool(name, args)
+    except Exception as e:
+        return f"MCP call_tool({name}) failed: {e}"
+    return rag_mcp_client.extract_text_content(result)[:4000]
+
+
 def health_check() -> str:
     """
     Run system health check. Use this to diagnose problems!
@@ -1112,6 +1168,19 @@ TOOLS = [
         }, "required": ["text"]}
     }},
     {"type": "function", "function": {
+        "name": "mcp_list_tools",
+        "description": "List the tools advertised by the configured MCP server (RAG_API_URL when RAG_TRANSPORT=mcp). Use BEFORE mcp_call_tool to discover what's available. Disabled when RAG_TRANSPORT is not 'mcp'.",
+        "parameters": {"type": "object", "properties": {}, "required": []}
+    }},
+    {"type": "function", "function": {
+        "name": "mcp_call_tool",
+        "description": "Invoke a tool on the configured MCP server by name. Use mcp_list_tools first. `arguments` is a JSON object encoded as a string. Disabled when RAG_TRANSPORT is not 'mcp'.",
+        "parameters": {"type": "object", "properties": {
+            "name": {"type": "string", "description": "Tool name as advertised by the server"},
+            "arguments": {"type": "string", "description": "JSON object literal as a string, e.g. '{\"query\":\"hello\",\"top_k\":3}'"}
+        }, "required": ["name"]}
+    }},
+    {"type": "function", "function": {
         "name": "add_custom_face",
         "description": "Add a custom face to data/custom_faces.json. After adding, the face becomes available immediately. ALWAYS output FACE: <name> and SAY: <short text> in your FINAL reply to the user so they see the new face on the E-Ink display.",
         "parameters": {"type": "object", "properties": {
@@ -1174,6 +1243,8 @@ TOOL_MAP = {
     "vault_search": vault_search,
     "query_rag": query_rag,
     "persist_to_rag": persist_to_rag,
+    "mcp_list_tools": mcp_list_tools,
+    "mcp_call_tool": mcp_call_tool,
 }
 
 
@@ -1208,6 +1279,8 @@ _TOOL_ICONS = {
     "vault_search": "🔎",
     "query_rag": "🧠",
     "persist_to_rag": "💾",
+    "mcp_list_tools": "🛠",
+    "mcp_call_tool": "🔌",
 }
 
 
