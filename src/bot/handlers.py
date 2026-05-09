@@ -897,9 +897,30 @@ _MODEL_EMOJI = {"gemini": "♊️", "glm": "🇨🇳", "ollama": "🦙"}
 
 
 def _ollama_list_with_capabilities(timeout: float = 4.0) -> list[dict]:
-    """Fetch installed Ollama models + capabilities. Returns [{name, supports_tools}]."""
+    """Fetch installed Ollama models + capabilities. Returns [{name, supports_tools}].
+
+    Resolves the host in this priority order so a persisted ``/model`` pick
+    points discovery at the same Ollama the connector is actually using:
+      1. ``data/active_model.json`` ``api_base`` (if model is an ollama_chat/*)
+      2. The live ``LiteLLMConnector.api_base`` if it's an ollama_chat model
+      3. ``OLLAMA_API_BASE`` env / config default
+    """
     import requests
-    base = (OLLAMA_API_BASE or "").rstrip("/")
+    from llm.litellm_connector import _load_active_model
+
+    base = ""
+    saved = _load_active_model()
+    if saved and isinstance(saved.get("model"), str) and saved["model"].startswith("ollama_chat/"):
+        base = (saved.get("api_base") or "").rstrip("/")
+    if not base:
+        try:
+            router = get_router()
+            if isinstance(router.litellm.model, str) and router.litellm.model.startswith("ollama_chat/"):
+                base = (router.litellm.api_base or "").rstrip("/")
+        except Exception:
+            pass
+    if not base:
+        base = (OLLAMA_API_BASE or "").rstrip("/")
     if not base:
         return []
     try:
