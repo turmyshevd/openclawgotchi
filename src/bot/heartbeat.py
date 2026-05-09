@@ -295,10 +295,11 @@ async def send_heartbeat(context):
 
     prompt += "\n\n[Reflect. Think out loud. Then FACE: and SAY:]"
 
-    # The HEARTBEAT.md template is English; without a final language pin
-    # the model defaults to English even when BOT_LANGUAGE is set, because
-    # the long English user prompt overpowers the system-level directive.
-    # Reinforce the pin here so the reflection itself follows BOT_LANGUAGE.
+    # The HEARTBEAT.md template is English; without a hard language pin
+    # the model defaults to English part of the time even when BOT_LANGUAGE
+    # is set, because the long English user prompt overpowers the
+    # system-level directive. Pin the language at BOTH ends of the prompt
+    # so the model can't drift no matter where its attention is anchored.
     from config import BOT_LANGUAGE
     _LANG_NAMES = {
         "de": "Deutsch", "en": "English", "ru": "Русский", "es": "Español",
@@ -308,7 +309,19 @@ async def send_heartbeat(context):
     _lang_code = (BOT_LANGUAGE or "").strip().lower()
     if _lang_code and _lang_code != "en":
         _lang_name = _LANG_NAMES.get(_lang_code, _lang_code)
-        prompt += f"\n\nIMPORTANT: write the reflection text and the SAY: bubble in **{_lang_name}**, not English. The template above is English only because it's a system instruction — your output must be in {_lang_name}."
+        # Front pin: forces language before the English template starts.
+        prompt = (
+            f"## Sprache der Antwort: {_lang_name}\n\n"
+            f"Schreibe **die GESAMTE Antwort** auf {_lang_name}. Jedes Wort, jeder "
+            f"Satz, auch die SAY:- und FACE:-Zeilen am Ende. Die Vorlage unten ist "
+            f"nur auf Englisch, weil sie eine Systemanweisung ist — DEINE Antwort "
+            f"muss auf {_lang_name} sein.\n\n---\n\n"
+        ) + prompt
+        # End pin: last word the model reads before generating its first token.
+        prompt += (
+            f"\n\n[Reflektiere auf {_lang_name}. Antworte auf {_lang_name}. "
+            f"Nicht auf Englisch. {_lang_name} only.]"
+        )
     
     # 7. Call LLM
     router = get_router()
