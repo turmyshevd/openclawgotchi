@@ -34,10 +34,11 @@ HISTORY_LIMIT = int(os.environ.get("HISTORY_LIMIT", "10"))
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini/gemini-1.5-flash")
 GEMINI_API_BASE = os.environ.get("GEMINI_API_BASE", "")  # Optional override for Z.ai/OpenAI
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:14b")
+OLLAMA_API_BASE = os.environ.get("OLLAMA_API_BASE", "http://ollama-server:11434")
 
 # Optional external RAG (Retrieval-Augmented Generation) service.
 # When RAG_API_URL is empty the rag tools degrade gracefully (no-op).
-# Expected REST contract is documented in src/llm/rag_client.py.
 RAG_API_URL = os.environ.get("RAG_API_URL", "").rstrip("/")
 RAG_API_KEY = os.environ.get("RAG_API_KEY", "")
 RAG_DEFAULT_COLLECTIONS = [
@@ -64,6 +65,10 @@ LLM_PRESETS = {
     "glm": {
         "model": "anthropic/glm-5.1",
         "api_base": "https://api.z.ai/api/anthropic"
+    },
+    "ollama": {
+        "model": f"ollama_chat/{OLLAMA_MODEL}",
+        "api_base": OLLAMA_API_BASE
     }
 }
 
