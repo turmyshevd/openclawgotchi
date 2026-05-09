@@ -896,10 +896,39 @@ async def cmd_use(update: Update, context: ContextTypes.DEFAULT_TYPE):
 _MODEL_EMOJI = {"gemini": "♊️", "glm": "🇨🇳", "ollama": "🦙"}
 
 
+def _resolve_ollama_base() -> str:
+    """Single source of truth for which Ollama host to talk to.
+
+    Priority order — the persisted choice always wins, so a private LAN
+    IP saved on the device never gets shadowed by the placeholder default
+    that ships in the repo:
+      1. ``data/active_model.json`` ``api_base`` (when model is ollama_chat/*)
+      2. live ``LiteLLMConnector.api_base`` (when model is ollama_chat/*)
+      3. ``OLLAMA_API_BASE`` env / config default
+
+    Returns the trimmed base URL or an empty string when nothing resolves.
+    """
+    from llm.litellm_connector import _load_active_model
+    saved = _load_active_model()
+    if saved and isinstance(saved.get("model"), str) and saved["model"].startswith("ollama_chat/"):
+        base = (saved.get("api_base") or "").rstrip("/")
+        if base:
+            return base
+    try:
+        router = get_router()
+        if isinstance(router.litellm.model, str) and router.litellm.model.startswith("ollama_chat/"):
+            base = (router.litellm.api_base or "").rstrip("/")
+            if base:
+                return base
+    except Exception:
+        pass
+    return (OLLAMA_API_BASE or "").rstrip("/")
+
+
 def _ollama_list_with_capabilities(timeout: float = 4.0) -> list[dict]:
     """Fetch installed Ollama models + capabilities. Returns [{name, supports_tools}]."""
     import requests
-    base = (OLLAMA_API_BASE or "").rstrip("/")
+    base = _resolve_ollama_base()
     if not base:
         return []
     try:
@@ -967,7 +996,7 @@ async def cb_model(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("omd:"):
         model_name = data.split(":", 1)[1]
         full = f"ollama_chat/{model_name}"
-        router.litellm.set_model(full, OLLAMA_API_BASE)
+        router.litellm.set_model(full, _resolve_ollama_base() or OLLAMA_API_BASE)
         router.force_lite = True
         await query.edit_message_text(
             f"🦙 Switched to *Ollama / {model_name}*\n`{full}`",
@@ -994,7 +1023,7 @@ async def cb_model(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         if not models:
             await query.edit_message_text(
-                f"❌ Could not reach Ollama at `{OLLAMA_API_BASE}`",
+                f"❌ Could not reach Ollama at `{_resolve_ollama_base() or OLLAMA_API_BASE}`",
                 parse_mode="Markdown",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◂ Back", callback_data="model:back")]])
             )
