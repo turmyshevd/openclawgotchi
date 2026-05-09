@@ -185,6 +185,23 @@ def render_ui(mood="happy", status_text="", fast_mode=True):
         WIDTH, HEIGHT = 250, 122
         image = Image.new('1', (WIDTH, HEIGHT), 255)
         draw = ImageDraw.Draw(image)
+
+        # B variant: build a parallel "red" image. All-white = no red pixels;
+        # we only paint into it for warning accents (e.g. low battery).
+        red_image = Image.new('1', (WIDTH, HEIGHT), 255) if EPD_VARIANT_B else None
+        red_draw = ImageDraw.Draw(red_image) if red_image is not None else None
+
+        # Best-effort battery probe — returns None when no UPS HAT or I2C off.
+        battery_text = ""
+        battery_low = False
+        try:
+            from hardware import battery as _battery
+            _b = _battery.read()
+            if _b is not None:
+                battery_text = _b.short()        # "🔋 87% / 8.12V"
+                battery_low = _b.percentage < 20  # red accent on B variant only
+        except Exception:
+            pass
         
         # --- FONTS ---
         try:
@@ -289,11 +306,29 @@ def render_ui(mood="happy", status_text="", fast_mode=True):
         draw.text((2, 1), display_name, font=font_ui, fill=0)
         
         # Right: Stats (Formatted clearly)
-        # e.g. T:45C | Free:120M | 14:00
+        # e.g. T:45C | Free:120M | 14:00 [| 🔋87%]
+        # The battery suffix renders as RED text on the B variant when low,
+        # otherwise black like the rest. Red is an accent only — never the
+        # background — so a healthy battery looks identical to the legacy
+        # display.
         txt_stats = f"T:{stats['temp']}°C | Free:{stats['mem_avail']}MB | {now}"
-        bbox = draw.textbbox((0, 0), txt_stats, font=font_ui)
+        battery_suffix = f" | {battery_text}" if battery_text else ""
+        full_stats = txt_stats + battery_suffix
+        bbox = draw.textbbox((0, 0), full_stats, font=font_ui)
         w = bbox[2] - bbox[0]
-        draw.text((WIDTH - w - 2, 1), txt_stats, font=font_ui, fill=0)
+        stats_x = WIDTH - w - 2
+
+        if battery_suffix and red_draw is not None and battery_low:
+            # Split: prefix in black layer, battery suffix in red layer only.
+            # Result on B panel: prefix renders black, suffix renders red.
+            bbox_pre = draw.textbbox((0, 0), txt_stats, font=font_ui)
+            pre_w = bbox_pre[2] - bbox_pre[0]
+            draw.text((stats_x, 1), txt_stats, font=font_ui, fill=0)
+            red_draw.text((stats_x + pre_w, 1), battery_suffix, font=font_ui, fill=0)
+        else:
+            # Mono variant, healthy battery, or no battery present:
+            # one black draw call, no red layer touched.
+            draw.text((stats_x, 1), full_stats, font=font_ui, fill=0)
         
         # Line
         draw.line((0, HEADER_H, WIDTH, HEADER_H), fill=0)
@@ -478,16 +513,19 @@ def render_ui(mood="happy", status_text="", fast_mode=True):
         # Rotate 180 degrees if needed
         # image = image.rotate(180) # Uncomment if you want to test rotation
         rotated_image = image.rotate(180)
-        
+        rotated_red = red_image.rotate(180) if red_image is not None else None
+
         # Update Display
         #   mono variant: partial-base for fast_mode (no full refresh, lower flicker), full display() otherwise
-        #   B variant: only full refresh exists (3-color panel). display() takes (black, red); the red plane
-        #              stays empty (all-white image, all-0xFF buffer ⇒ no red pixels) so drawings render as
-        #              black-on-white. Red would need explicit drawing into a separate PIL image.
+        #   B variant: full refresh only (3-color panel). display() takes (black, red); when no warning
+        #              accent was drawn the red layer stays all-white (all-0xFF buffer ⇒ no red pixels)
+        #              and the panel renders pure black-on-white. Red is reserved for warning accents
+        #              (e.g. low-battery suffix), never used as background.
         if EPD_VARIANT_B:
             black_buf = epd.getbuffer(rotated_image)
-            red_blank = Image.new("1", rotated_image.size, 255)  # all white = no red
-            epd.display(black_buf, epd.getbuffer(red_blank))
+            red_buf = epd.getbuffer(rotated_red) if rotated_red is not None else \
+                      epd.getbuffer(Image.new("1", rotated_image.size, 255))
+            epd.display(black_buf, red_buf)
         else:
             if fast_mode:
                 epd.displayPartBaseImage(epd.getbuffer(rotated_image))
