@@ -1284,6 +1284,96 @@ _TOOL_ICONS = {
 }
 
 
+# ============================================================
+# MCP TOOL AUTO-REGISTRATION
+# ============================================================
+# When RAG_TRANSPORT=mcp and the MCP server is reachable, discover
+# its advertised tools at module-init time and register each as a
+# first-class TOOL_MAP entry (with full JSON-Schema). The LLM then
+# calls e.g. ``rag_search(query=..., top_k=3)`` directly instead of
+# the two-hop ``mcp_list_tools`` → ``mcp_call_tool`` indirection.
+# Names that collide with an existing TOOL_MAP entry are skipped.
+# Failures are logged but never crash the bot.
+
+_MCP_REGISTERED_TOOLS: list[str] = []
+
+
+def _make_mcp_tool_wrapper(tool_name: str):
+    """Build a kwargs-based callable that invokes ``tool_name`` over MCP."""
+    def _mcp_tool(**kwargs) -> str:
+        from llm import rag_mcp_client
+        client = rag_mcp_client.get_client()
+        if client is None:
+            return f"MCP unavailable for {tool_name}"
+        try:
+            result = client.call_tool(tool_name, kwargs)
+        except Exception as e:
+            return f"MCP {tool_name} failed: {e}"
+        return rag_mcp_client.extract_text_content(result)[:4000]
+    _mcp_tool.__name__ = tool_name
+    return _mcp_tool
+
+
+def _register_mcp_tools_at_startup() -> int:
+    """Discover MCP tools and add them as first-class TOOL_MAP entries.
+
+    Idempotent: a tool already in TOOL_MAP (collision with a built-in
+    name) is skipped. Returns the number of newly-registered tools.
+    Safe to call multiple times.
+    """
+    from llm import rag_mcp_client
+    if not rag_mcp_client.is_enabled():
+        return 0
+    client = rag_mcp_client.get_client()
+    if client is None:
+        return 0
+    try:
+        tools = client.list_tools()
+    except Exception as e:
+        log.warning(f"MCP auto-registration: list_tools failed: {e}")
+        return 0
+
+    registered = 0
+    for tool in tools:
+        name = tool.get("name")
+        if not name or name in TOOL_MAP:
+            continue
+        desc = (tool.get("description") or name)[:1024]
+        schema = tool.get("inputSchema") or {"type": "object", "properties": {}}
+        TOOLS.append({
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": desc,
+                "parameters": schema,
+            },
+        })
+        TOOL_MAP[name] = _make_mcp_tool_wrapper(name)
+        _TOOL_ICONS.setdefault(name, "🔌")
+        _MCP_REGISTERED_TOOLS.append(name)
+        registered += 1
+
+    if registered:
+        log.info(
+            "MCP auto-registered %d tool(s) as first-class: %s",
+            registered, ", ".join(_MCP_REGISTERED_TOOLS),
+        )
+    return registered
+
+
+# Try at import time. Server unreachable → silent no-op (the existing
+# mcp_list_tools / mcp_call_tool fallback path remains usable).
+try:
+    _register_mcp_tools_at_startup()
+except Exception as _mcp_reg_err:
+    log.warning("MCP auto-registration skipped: %s", _mcp_reg_err)
+
+
+def get_registered_mcp_tools() -> list[str]:
+    """Return names of MCP tools registered as first-class. Used by prompts."""
+    return list(_MCP_REGISTERED_TOOLS)
+
+
 def _format_tool_action(func_name: str, args: dict, result: str) -> str:
     """Format a single tool action for the user summary."""
     icon = _TOOL_ICONS.get(func_name, "🔧")
