@@ -5,6 +5,7 @@ LiteLLM connector — full-featured fallback with tools.
 import contextvars
 import json
 import logging
+import os
 import shlex
 import subprocess
 from pathlib import Path
@@ -604,6 +605,46 @@ def remove_scheduled_task(job_id: str) -> str:
         return f"Error: {e}"
 
 
+def query_rag(query: str, top_k: int = 5) -> str:
+    """Search the configured RAG vault for snippets relevant to `query`.
+
+    The RAG service is a long-term, Markdown-first memory backend reachable
+    via REST (see RAG_API_URL env var and src/llm/rag_client.py for the API
+    contract). Use this to ground answers in the user's notes before falling
+    back to general knowledge. Returns a formatted list of top hits with
+    file path, score and chunk text. When RAG is not configured
+    (RAG_API_URL empty) returns a clear hint instead of failing.
+    """
+    from llm import rag_client
+    if not rag_client.is_configured():
+        return "RAG not configured (set RAG_API_URL in .env). Falling back to in-bot memory."
+    if not query or not query.strip():
+        return "Error: query is empty"
+    response = rag_client.query(query, top_k=top_k)
+    if response is None:
+        return f"Error: RAG service unreachable at {os.environ.get('RAG_API_URL', '?')}"
+    return rag_client.format_hits(response)
+
+
+def persist_to_rag(text: str, title: str = "", tags: str = "") -> str:
+    """Save a markdown note / reflection to the configured RAG vault.
+
+    Use sparingly — only for content worth recalling later (decisions,
+    preferences, project context). Casual chat does NOT belong here.
+    `tags` is a comma-separated string for ergonomics.
+    """
+    from llm import rag_client
+    if not rag_client.is_configured():
+        return "RAG not configured (set RAG_API_URL in .env)."
+    if not text or len(text.strip()) < 10:
+        return "Error: text too short to be worth persisting (min 10 chars)"
+    tag_list = [t.strip() for t in (tags or "").split(",") if t.strip()] or None
+    response = rag_client.persist(text, title=title or None, tags=tag_list)
+    if response is None:
+        return f"Error: RAG service unreachable at {os.environ.get('RAG_API_URL', '?')}"
+    return f"Persisted to vault. Server: {str(response)[:200]}"
+
+
 def health_check() -> str:
     """
     Run system health check. Use this to diagnose problems!
@@ -1054,6 +1095,23 @@ TOOLS = [
         }, "required": ["query"]}
     }},
     {"type": "function", "function": {
+        "name": "query_rag",
+        "description": "Search the configured RAG vault — long-term, Markdown-first memory hosted on a separate service. Use BEFORE answering questions about user notes / projects / past decisions, to ground replies in real content rather than hallucinate. Returns top hits with file path + excerpt + score. Disabled when RAG_API_URL is not set.",
+        "parameters": {"type": "object", "properties": {
+            "query": {"type": "string", "description": "Natural-language search query"},
+            "top_k": {"type": "integer", "description": "How many hits to return (default 5, max 50)"}
+        }, "required": ["query"]}
+    }},
+    {"type": "function", "function": {
+        "name": "persist_to_rag",
+        "description": "Save a markdown note / reflection to the configured RAG vault for future recall. Use SPARINGLY — only for content worth recalling later (decisions, preferences, project context). Do NOT persist casual chat. Disabled when RAG_API_URL is not set.",
+        "parameters": {"type": "object", "properties": {
+            "text": {"type": "string", "description": "Markdown body of the note (10+ chars)"},
+            "title": {"type": "string", "description": "Optional short title"},
+            "tags": {"type": "string", "description": "Optional comma-separated tags"}
+        }, "required": ["text"]}
+    }},
+    {"type": "function", "function": {
         "name": "add_custom_face",
         "description": "Add a custom face to data/custom_faces.json. After adding, the face becomes available immediately. ALWAYS output FACE: <name> and SAY: <short text> in your FINAL reply to the user so they see the new face on the E-Ink display.",
         "parameters": {"type": "object", "properties": {
@@ -1114,6 +1172,8 @@ TOOL_MAP = {
     "vault_read": vault_read,
     "vault_list": vault_list,
     "vault_search": vault_search,
+    "query_rag": query_rag,
+    "persist_to_rag": persist_to_rag,
 }
 
 
@@ -1146,6 +1206,8 @@ _TOOL_ICONS = {
     "vault_read": "📘",
     "vault_list": "📂",
     "vault_search": "🔎",
+    "query_rag": "🧠",
+    "persist_to_rag": "💾",
 }
 
 
@@ -1245,63 +1307,25 @@ def _build_tool_footer(actions: list[str]) -> str:
 # CONNECTOR
 # ============================================================
 
-_ACTIVE_MODEL_FILE = None  # Set lazily to avoid circular import
-
-
-def _active_model_path() -> Path:
-    global _ACTIVE_MODEL_FILE
-    if _ACTIVE_MODEL_FILE is None:
-        from config import DATA_DIR
-        _ACTIVE_MODEL_FILE = DATA_DIR / "active_model.json"
-    return _ACTIVE_MODEL_FILE
-
-
-def _load_active_model() -> Optional[dict]:
-    try:
-        p = _active_model_path()
-        if p.exists():
-            return json.loads(p.read_text())
-    except Exception as e:
-        log.warning(f"Could not load active_model.json: {e}")
-    return None
-
-
-def _save_active_model(model: str, api_base: Optional[str]) -> None:
-    try:
-        p = _active_model_path()
-        p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(json.dumps({"model": model, "api_base": api_base}, indent=2))
-    except Exception as e:
-        log.warning(f"Could not save active_model.json: {e}")
-
-
 class LiteLLMConnector(LLMConnector):
     """LiteLLM connector with tools."""
-
+    
     name = "litellm"
-
+    
     def __init__(self, model: str = None, api_base: str = None):
         from config import DEFAULT_LITE_PRESET, LLM_PRESETS, GEMINI_API_BASE
         if model is not None:
             self.model = model
             self.api_base = api_base
         else:
-            # Persisted choice from /model (survives restart) takes priority
-            saved = _load_active_model()
-            if saved and saved.get("model"):
-                self.model = saved["model"]
-                self.api_base = saved.get("api_base")
-                log.info(f"[LiteLLM] Restored active model: {self.model}")
-            else:
-                preset = LLM_PRESETS.get(DEFAULT_LITE_PRESET, LLM_PRESETS["glm"])
-                self.model = preset["model"]
-                self.api_base = preset.get("api_base") or GEMINI_API_BASE or None
+            preset = LLM_PRESETS.get(DEFAULT_LITE_PRESET, LLM_PRESETS["glm"])
+            self.model = preset["model"]
+            self.api_base = preset.get("api_base") or GEMINI_API_BASE or None
 
     def set_model(self, model: str, api_base: str = None):
-        """Dynamically switch model and api_base. Persists across restarts."""
+        """Dynamically switch model and api_base."""
         self.model = model
         self.api_base = api_base
-        _save_active_model(model, api_base)
     
     def is_available(self) -> bool:
         return LITELLM_AVAILABLE
