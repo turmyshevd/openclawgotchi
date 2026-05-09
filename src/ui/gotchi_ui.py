@@ -163,6 +163,34 @@ def _load_all_faces() -> dict:
     return faces
 
 
+# --- Red-layer routing rules for the B variant ----------------------------
+# The B-variant panel has a dedicated red-ink layer; we reserve it for
+# semantically loaded glyphs. Keep this list short so red stays "meaning",
+# not decoration. Battery-low already uses red; these add:
+#   - hearts (love-mood face, custom-face hearts) → emotional accent
+#   - critical-RAM footer text  → status warning (matches OVERHEATING for free)
+_HEART_CHARS = set("♥❤💕💖💗💘💝💞💟💔🫀")
+
+# Footer status_text strings emitted by hardware/auto_mood.py for critical
+# states. Match a small whitelist by substring so language tweaks ("Out of
+# memory!", "Speicher voll!") can be added centrally if we ever localize.
+_CRITICAL_STATUS_MARKERS = (
+    "OOM",            # auto_mood RAM_CRITICAL
+    "OVERHEATING",    # auto_mood TEMP_CRITICAL — free upgrade, same idea
+)
+
+
+def _face_glyph_is_red(face_str: str) -> bool:
+    return any(ch in _HEART_CHARS for ch in face_str)
+
+
+def _status_text_is_critical(status_text: str) -> bool:
+    if not status_text:
+        return False
+    upper = status_text.upper()
+    return any(marker in upper for marker in _CRITICAL_STATUS_MARKERS)
+
+
 def render_ui(mood="happy", status_text="", fast_mode=True):
     """Render the UI."""
     stats = get_system_stats()
@@ -342,7 +370,12 @@ def render_ui(mood="happy", status_text="", fast_mode=True):
         # bot name on the top-left has room and the panel can show all three
         # at once. On the B variant we render the battery suffix into the
         # red layer when battery_low — otherwise normal black ink.
-        draw.text((4, HEIGHT - FOOTER_H + 1), status_text[:30], font=font_ui, fill=0)
+        # Critical-state footer text (OOM, OVERHEATING) goes red so the
+        # warning can't be missed at a glance.
+        status_target = draw
+        if red_draw is not None and _status_text_is_critical(status_text):
+            status_target = red_draw
+        status_target.text((4, HEIGHT - FOOTER_H + 1), status_text[:30], font=font_ui, fill=0)
 
         xp_w = 0
         if xp_str:
@@ -394,8 +427,12 @@ def render_ui(mood="happy", status_text="", fast_mode=True):
             cx = WIDTH // 2
             face_y = cy - fh // 2
 
-        # Draw Face
-        draw_text_with_fallback(draw, (cx - fw // 2, face_y - 4), face_str, font=font_face, fallback_font=font_emoji_face, fill=0)
+        # Draw Face — heart glyphs go to the red layer on B variant so the
+        # "love" mood (and custom faces with hearts) actually look loving.
+        face_target = draw
+        if red_draw is not None and _face_glyph_is_red(face_str):
+            face_target = red_draw
+        draw_text_with_fallback(face_target, (cx - fw // 2, face_y - 4), face_str, font=font_face, fallback_font=font_emoji_face, fill=0)
         
         # Draw Bubble if needed
         if speech_text:
