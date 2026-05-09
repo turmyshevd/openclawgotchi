@@ -443,6 +443,81 @@ async def cmd_recall(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg)
 
 
+async def cmd_rag(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Ad-hoc query against the configured RAG knowledge vault.
+
+    Usage:
+      /rag <query>          → search, top 5 hits
+      /rag --top 10 <query> → search, top 10 hits
+      /rag                  → show config + reachability
+    """
+    if not is_allowed(update.effective_user.id, update.effective_chat.id):
+        return
+
+    from llm import rag_client
+
+    args = list(context.args or [])
+    if not args:
+        # Status mode — show config + reachability
+        if not rag_client.is_configured():
+            await update.message.reply_text(
+                "🧠 *RAG* not configured.\n\n"
+                "Set `RAG_API_URL=http://your-rag-host:8765` in `.env` and restart the bot.",
+                parse_mode="Markdown",
+            )
+            return
+        h = rag_client.health()
+        if h is None:
+            from config import RAG_API_URL
+            await update.message.reply_text(
+                f"🧠 RAG configured at `{RAG_API_URL}` but unreachable.",
+                parse_mode="Markdown",
+            )
+            return
+        comps = h.get("components") or []
+        lines = [f"✅ RAG *{h.get('version','?')}* online", "", "*Components:*"]
+        for c in comps:
+            sym = "✅" if c.get("healthy") else "❌"
+            lines.append(f"  {sym} {c.get('name')} ({c.get('latency_ms', '?'):.1f} ms)" if isinstance(c.get('latency_ms'), (int, float)) else f"  {sym} {c.get('name')}")
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+        return
+
+    # Parse --top N
+    top_k = 5
+    if args[0] == "--top" and len(args) >= 3:
+        try:
+            top_k = max(1, min(int(args[1]), 50))
+            args = args[2:]
+        except ValueError:
+            pass
+
+    query = " ".join(args).strip()
+    if not query:
+        await update.message.reply_text("Usage: `/rag <query>`", parse_mode="Markdown")
+        return
+
+    if not rag_client.is_configured():
+        await update.message.reply_text("🧠 RAG not configured. Set `RAG_API_URL` in `.env`.", parse_mode="Markdown")
+        return
+
+    await update.message.chat.send_action(action=ChatAction.TYPING)
+    import asyncio
+    response = await asyncio.to_thread(rag_client.query, query, top_k)
+    if response is None:
+        await update.message.reply_text("❌ RAG service unreachable.")
+        return
+
+    formatted = rag_client.format_hits(response, max_chars=3500)
+    duration = response.get("duration_ms", 0)
+    reranked = " (reranked)" if response.get("reranked") else ""
+    header = f"🧠 *{len(response.get('hits') or [])} hits* in {duration:.0f} ms{reranked}\n\n"
+    # Telegram Markdown is finicky; use plain text body inside backticks
+    await update.message.reply_text(
+        header + "```\n" + formatted + "\n```",
+        parse_mode="Markdown",
+    )
+
+
 async def cmd_vault(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show vault status."""
     user = update.effective_user

@@ -2,6 +2,20 @@
 
 All notable changes to the OpenClawGotchi project will be documented in this file.
 
+## [Unreleased] - 2026-05-09
+
+### Added
+- **External RAG service integration via REST**: connect the bot to any RAG (Retrieval-Augmented Generation) backend that exposes a small documented HTTP API (see `src/llm/rag_client.py` module docstring for the contract). The LLM can search a long-term Markdown vault at reply time and persist new reflections back. New module `src/llm/rag_client.py` is a thin requests-based client; `src/llm/rag_mcp_client.py` ships as a roadmap stub for the future Option B (Python MCP-client) path.
+- **New LLM tools** in `litellm_connector.py`:
+    - `query_rag(query, top_k=5)` — search the vault, returns top hits with file path + chunk + score.
+    - `persist_to_rag(text, title, tags)` — save a markdown note. Bot is instructed to use sparingly, only for content worth recalling.
+- **`/rag` Telegram command**: ad-hoc query (`/rag <query>` or `/rag --top 10 <query>`); without args reports RAG reachability and per-component health.
+- **Env vars**: `RAG_API_URL` (empty disables the feature), `RAG_API_KEY` (Bearer auth, optional), `RAG_DEFAULT_COLLECTIONS` (comma-separated, default `agent_notes`).
+
+### Notes
+- All rag tools degrade gracefully when `RAG_API_URL` is unset or the host is unreachable — no exceptions, just informative return strings — so installs without an external RAG service remain unaffected.
+- No new top-level dependencies; `requests` is already pulled in by litellm.
+
 ## [Unreleased] - 2026-04-29
 
 ### Added

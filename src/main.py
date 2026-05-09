@@ -30,7 +30,7 @@ from db.memory import init_db
 from hardware.display import boot_screen, online_screen, show_face
 from bot.handlers import (
     cmd_start, cmd_clear, cmd_context, cmd_status, cmd_xp, cmd_pro, cmd_use,
-    cmd_remember, cmd_recall, cmd_vault, cmd_cron, cmd_jobs, cmd_memory, cmd_health,
+    cmd_remember, cmd_recall, cmd_vault, cmd_rag, cmd_cron, cmd_jobs, cmd_memory, cmd_health,
     handle_message, handle_voice
 )
 from bot.heartbeat import send_heartbeat
@@ -260,6 +260,7 @@ def main():
     app.add_handler(CommandHandler("remember", cmd_remember))
     app.add_handler(CommandHandler("recall", cmd_recall))
     app.add_handler(CommandHandler("vault", cmd_vault))
+    app.add_handler(CommandHandler("rag", cmd_rag))
     app.add_handler(CommandHandler("cron", cmd_cron))
     app.add_handler(CommandHandler("jobs", cmd_jobs))
 

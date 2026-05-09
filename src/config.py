@@ -34,6 +34,16 @@ HISTORY_LIMIT = int(os.environ.get("HISTORY_LIMIT", "10"))
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini/gemini-1.5-flash")
 GEMINI_API_BASE = os.environ.get("GEMINI_API_BASE", "")  # Optional override for Z.ai/OpenAI
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+
+# Optional external RAG (Retrieval-Augmented Generation) service.
+# When RAG_API_URL is empty the rag tools degrade gracefully (no-op).
+# Expected REST contract is documented in src/llm/rag_client.py.
+RAG_API_URL = os.environ.get("RAG_API_URL", "").rstrip("/")
+RAG_API_KEY = os.environ.get("RAG_API_KEY", "")
+RAG_DEFAULT_COLLECTIONS = [
+    c.strip() for c in os.environ.get("RAG_DEFAULT_COLLECTIONS", "agent_notes").split(",") if c.strip()
+]
+
 BOT_LANGUAGE = os.environ.get("BOT_LANGUAGE", "en")  # Default response language
 GROUP_CHAT_ID = int(os.environ.get("GROUP_CHAT_ID", "0"))  # Optional group for heartbeat
 ENABLE_LITELLM_TOOLS = _env_flag("ENABLE_LITELLM_TOOLS", True)
