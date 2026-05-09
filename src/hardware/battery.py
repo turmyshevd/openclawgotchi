@@ -3,10 +3,11 @@ UPS HAT (C) battery reader — INA219 over I2C.
 
 Optional hardware addon: https://www.waveshare.com/wiki/UPS_HAT_(C)
 
-Returns voltage, current, charge state and a 0-100 percentage based on the
-2x 18650 pack (3.0–4.2 V per cell, 6.0–8.4 V total). Auto-detects the
-sensor; if absent or I2C disabled, every public function returns None
-without raising — callers can use `is_available()` to gate UI.
+Returns voltage, current, charge state and a 0-100 percentage based on
+the **single 18650 cell** Waveshare ships with the UPS HAT (C)
+(3.0 V empty → 4.2 V full). Auto-detects the sensor; if absent or
+I2C is disabled, every public function returns ``None`` without
+raising — callers can use ``is_available()`` to gate UI.
 
 Adapted from Waveshare's INA219.py demo, simplified to a single-shot
 reader (the bot polls infrequently — no need for shared state).
@@ -104,12 +105,14 @@ def _calibrate(bus) -> None:
 
 
 def _percentage_from_voltage(volts: float) -> int:
-    """Map bus voltage of a 2S 18650 pack to a 0–100 percentage.
+    """Map bus voltage of a 1S 18650 cell to a 0–100 percentage.
 
-    Empty ≈ 6.0 V (3.0 V/cell), full ≈ 8.4 V (4.2 V/cell).
-    Linear approximation — close enough for a status indicator.
+    UPS HAT (C) is a single-cell (1S) design. Empty ≈ 3.0 V,
+    full ≈ 4.2 V. Linear approximation — close enough for a status
+    indicator; real Li-ion cells have a non-linear discharge curve
+    but the user mostly cares about "low / mid / high".
     """
-    pct = (volts - 6.0) / (8.4 - 6.0) * 100.0
+    pct = (volts - 3.0) / (4.2 - 3.0) * 100.0
     return max(0, min(100, int(round(pct))))
 
 
