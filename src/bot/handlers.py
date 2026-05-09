@@ -8,7 +8,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ChatAction
 from telegram.ext import ContextTypes
 
@@ -29,7 +29,7 @@ from memory.vault import classify_message_for_vault, get_vault_stats
 from memory.summarize import optimize_history
 from cron.scheduler import add_cron_job, list_cron_jobs, remove_cron_job
 from skills.loader import get_eligible_skills
-from config import LLM_PRESETS, OPENAI_API_KEY
+from config import LLM_PRESETS, OPENAI_API_KEY, OLLAMA_API_BASE
 from llm.prompts import build_system_context, build_vault_context
 
 log = logging.getLogger(__name__)
@@ -886,9 +886,312 @@ async def cmd_use(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "gemini" in model_key: emoji = "♊️"
     
     await update.message.reply_text(f"{emoji} Switched to *{model_key.upper()}*!\nModel: {preset['model']}", parse_mode="Markdown")
-    
+
     # Visual update
     show_face(mood="happy", text=f"Model: {model_key.upper()}")
+
+
+# --- /model command: inline-button picker with live Ollama discovery ---
+
+_MODEL_EMOJI = {"gemini": "♊️", "glm": "🇨🇳", "ollama": "🦙"}
+
+
+def _ollama_list_with_capabilities(timeout: float = 4.0) -> list[dict]:
+    """Fetch installed Ollama models + capabilities. Returns [{name, supports_tools}]."""
+    import requests
+    base = (OLLAMA_API_BASE or "").rstrip("/")
+    if not base:
+        return []
+    try:
+        r = requests.get(f"{base}/api/tags", timeout=timeout)
+        r.raise_for_status()
+        names = [m.get("name") for m in r.json().get("models", []) if m.get("name")]
+    except Exception as e:
+        log.warning(f"Ollama /api/tags failed: {e}")
+        return []
+
+    out = []
+    for name in names:
+        supports = False
+        try:
+            sr = requests.post(f"{base}/api/show", json={"model": name}, timeout=timeout)
+            if sr.ok:
+                caps = sr.json().get("capabilities") or []
+                supports = "tools" in caps
+        except Exception:
+            pass
+        out.append({"name": name, "supports_tools": supports})
+    return out
+
+
+def _top_model_markup(current: str) -> InlineKeyboardMarkup:
+    rows = []
+    for key in LLM_PRESETS.keys():
+        emoji = _MODEL_EMOJI.get(key, "🔹")
+        active = LLM_PRESETS[key]["model"] == current or (
+            key == "ollama" and isinstance(current, str) and current.startswith("ollama_chat/")
+        )
+        marker = " ✅" if active else ""
+        suffix = " ▸" if key == "ollama" else ""
+        rows.append([InlineKeyboardButton(f"{emoji} {key}{marker}{suffix}", callback_data=f"model:{key}")])
+    return InlineKeyboardMarkup(rows)
+
+
+async def cmd_model(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show inline buttons to switch LLM model. With argument acts like /use."""
+    if not is_allowed(update.effective_user.id, update.effective_chat.id):
+        return
+
+    if context.args:
+        return await cmd_use(update, context)
+
+    router = get_router()
+    current = router.litellm.model
+    text = f"🦄 *Current:* `{current}`\n\nPick a model:"
+    await update.message.reply_text(text, parse_mode="Markdown", reply_markup=_top_model_markup(current))
+
+
+async def cb_model(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Callback for /model inline buttons (presets + Ollama submenu)."""
+    import asyncio
+    query = update.callback_query
+    if not is_allowed(query.from_user.id, query.message.chat_id):
+        await query.answer("Not allowed", show_alert=True)
+        return
+    await query.answer()
+
+    data = query.data or ""
+    router = get_router()
+
+    # Specific Ollama model switch: omd:<name>
+    if data.startswith("omd:"):
+        model_name = data.split(":", 1)[1]
+        full = f"ollama_chat/{model_name}"
+        router.litellm.set_model(full, OLLAMA_API_BASE)
+        router.force_lite = True
+        await query.edit_message_text(
+            f"🦙 Switched to *Ollama / {model_name}*\n`{full}`",
+            parse_mode="Markdown"
+        )
+        show_face(mood="happy", text=f"Ollama: {model_name[:20]}")
+        return
+
+    key = data.split(":", 1)[-1]
+
+    # Back to top menu
+    if key == "back":
+        await query.edit_message_text(
+            f"🦄 *Current:* `{router.litellm.model}`\n\nPick a model:",
+            parse_mode="Markdown",
+            reply_markup=_top_model_markup(router.litellm.model)
+        )
+        return
+
+    # Ollama: fetch and show submenu (only tool-capable models)
+    if key == "ollama":
+        await query.edit_message_text("🦙 Fetching models from Ollama server…")
+        models = await asyncio.to_thread(_ollama_list_with_capabilities)
+
+        if not models:
+            await query.edit_message_text(
+                f"❌ Could not reach Ollama at `{OLLAMA_API_BASE}`",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("◂ Back", callback_data="model:back")]])
+            )
+            return
+
+        tool_models = [m for m in models if m["supports_tools"]]
+        show_models = tool_models if tool_models else models
+        note = "" if tool_models else "\n⚠️ _No tool-capable models found, showing all_"
+
+        rows = []
+        for m in show_models:
+            name = m["name"]
+            cb = f"omd:{name}"
+            if len(cb.encode("utf-8")) > 60:
+                continue  # Telegram callback_data limit (64 bytes)
+            tag = "🔧" if m["supports_tools"] else "🔸"
+            rows.append([InlineKeyboardButton(f"{tag} {name}", callback_data=cb)])
+        rows.append([InlineKeyboardButton("◂ Back", callback_data="model:back")])
+
+        await query.edit_message_text(
+            f"🦙 *Ollama models* ({len(show_models)}){note}\n\n🔧 = supports tools",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(rows)
+        )
+        return
+
+    # Static presets (gemini, glm)
+    if key not in LLM_PRESETS:
+        await query.edit_message_text("❌ Unknown model.")
+        return
+
+    preset = LLM_PRESETS[key]
+    router.litellm.set_model(preset["model"], preset["api_base"])
+    router.force_lite = True
+
+    emoji = _MODEL_EMOJI.get(key, "🔹")
+    await query.edit_message_text(
+        f"{emoji} Switched to *{key.upper()}*\n`{preset['model']}`",
+        parse_mode="Markdown"
+    )
+    show_face(mood="happy", text=f"Model: {key.upper()}")
+
+
+async def cmd_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Pull latest code from upstream, refresh deps, restart service."""
+    import asyncio
+    import subprocess
+    from config import PROJECT_DIR, get_admin_id
+
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    if not is_allowed(user_id, chat_id):
+        return
+
+    # Owner-only — don't let any allowed user remote-update the bot
+    admin_id = get_admin_id()
+    if admin_id and user_id != admin_id:
+        await update.message.reply_text("⛔ Owner-only command.")
+        return
+
+    script = PROJECT_DIR / "scripts" / "auto_update.sh"
+    if not script.exists():
+        await update.message.reply_text(f"❌ Update script not found: `{script}`", parse_mode="Markdown")
+        return
+
+    check_only = bool(context.args and context.args[0].lower() in ("check", "--check"))
+
+    msg = await update.message.reply_text("🔍 Checking for updates…" if check_only else "⬇️ Updating…")
+
+    try:
+        cmd = ["bash", str(script)] + (["--check"] if check_only else [])
+        proc = await asyncio.to_thread(
+            subprocess.run, cmd,
+            cwd=str(PROJECT_DIR),
+            capture_output=True, text=True, timeout=300
+        )
+        out = (proc.stdout or "") + (proc.stderr or "")
+        out = out.strip()[-3500:]  # Telegram message size budget
+
+        # check-mode: exit 0 = updates available, 1 = up-to-date
+        if check_only:
+            status = "🆕 Updates available" if proc.returncode == 0 else "✅ Up-to-date"
+            await msg.edit_text(f"{status}\n\n```\n{out}\n```", parse_mode="Markdown")
+            return
+
+        if proc.returncode == 0:
+            await msg.edit_text(f"✅ Update complete\n\n```\n{out}\n```", parse_mode="Markdown")
+            show_face(mood="excited", text="Updated!")
+        elif proc.returncode == 4:
+            await msg.edit_text(
+                f"⚠️ Update failed — auto-rolled back to previous version\n\n```\n{out}\n```",
+                parse_mode="Markdown"
+            )
+            show_face(mood="confused", text="Update rolled back")
+        else:
+            await msg.edit_text(f"❌ Update failed (exit {proc.returncode})\n\n```\n{out}\n```", parse_mode="Markdown")
+            show_face(mood="confused", text="Update failed")
+    except subprocess.TimeoutExpired:
+        await msg.edit_text("❌ Update timed out after 5 min.")
+    except Exception as e:
+        await msg.edit_text(f"❌ Update error: `{e}`", parse_mode="Markdown")
+
+
+async def cmd_battery(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /battery command — show UPS HAT (C) status."""
+    if not is_allowed(update.effective_user.id, update.effective_chat.id):
+        return
+
+    from hardware import battery
+
+    reading = battery.read()
+    if reading is None:
+        await update.message.reply_text(
+            "🔌 No UPS HAT detected.\n"
+            "Make sure I2C is enabled and the UPS HAT (C) is connected, "
+            "then `/battery` again. (Check `i2cdetect -y 1` should list 0x43.)",
+            parse_mode="Markdown",
+        )
+        return
+
+    await update.message.reply_text(reading.long())
+
+
+async def cmd_rag(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Ad-hoc query against the configured RAG knowledge vault.
+
+    Usage:
+      /rag <query>          → search, top 5 hits
+      /rag --top 10 <query> → search, top 10 hits
+      /rag                  → show config + reachability
+    """
+    if not is_allowed(update.effective_user.id, update.effective_chat.id):
+        return
+
+    from llm import rag_client
+
+    args = list(context.args or [])
+    if not args:
+        if not rag_client.is_configured():
+            await update.message.reply_text(
+                "🧠 *RAG* not configured.\n\n"
+                "Set `RAG_API_URL=http://your-rag-host:8765` in `.env` and restart the bot.",
+                parse_mode="Markdown",
+            )
+            return
+        h = rag_client.health()
+        if h is None:
+            from config import RAG_API_URL
+            await update.message.reply_text(
+                f"🧠 RAG configured at `{RAG_API_URL}` but unreachable.",
+                parse_mode="Markdown",
+            )
+            return
+        comps = h.get("components") or []
+        lines = [f"✅ RAG *{h.get('version','?')}* online", "", "*Components:*"]
+        for c in comps:
+            sym = "✅" if c.get("healthy") else "❌"
+            lat = c.get("latency_ms")
+            if isinstance(lat, (int, float)):
+                lines.append(f"  {sym} {c.get('name')} ({lat:.1f} ms)")
+            else:
+                lines.append(f"  {sym} {c.get('name')}")
+        await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+        return
+
+    top_k = 5
+    if args[0] == "--top" and len(args) >= 3:
+        try:
+            top_k = max(1, min(int(args[1]), 50))
+            args = args[2:]
+        except ValueError:
+            pass
+
+    query = " ".join(args).strip()
+    if not query:
+        await update.message.reply_text("Usage: `/rag <query>`", parse_mode="Markdown")
+        return
+
+    if not rag_client.is_configured():
+        await update.message.reply_text("🧠 RAG not configured. Set `RAG_API_URL` in `.env`.", parse_mode="Markdown")
+        return
+
+    await update.message.chat.send_action(action=ChatAction.TYPING)
+    import asyncio
+    response = await asyncio.to_thread(rag_client.query, query, top_k)
+    if response is None:
+        await update.message.reply_text("❌ RAG service unreachable.")
+        return
+
+    formatted = rag_client.format_hits(response, max_chars=3500)
+    duration = response.get("duration_ms", 0)
+    reranked = " (reranked)" if response.get("reranked") else ""
+    header = f"🧠 *{len(response.get('hits') or [])} hits* in {duration:.0f} ms{reranked}\n\n"
+    await update.message.reply_text(
+        header + "```\n" + formatted + "\n```",
+        parse_mode="Markdown",
+    )
 
 
 async def cmd_memory(update: Update, context: ContextTypes.DEFAULT_TYPE):

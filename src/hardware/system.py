@@ -97,5 +97,20 @@ def get_stats_string() -> str:
         paths_info = f"[PATHS] Project: {PROJECT_DIR} | DB: {DB_PATH}"
     except Exception:
         paths_info = ""
-    
-    return f"{self_info}\n[SYSTEM] Uptime: {stats.uptime} | Temp: {stats.temp} | RAM: {stats.memory}\n{paths_info}"
+
+    # Optional UPS HAT (C) battery line — only shown when hardware is present
+    battery_info = ""
+    try:
+        from hardware.battery import read as _battery_read
+        b = _battery_read()
+        if b is not None:
+            battery_info = f"\n[BATTERY] {b.long()}"
+    except Exception:
+        pass
+
+    return (
+        f"{self_info}\n"
+        f"[SYSTEM] Uptime: {stats.uptime} | Temp: {stats.temp} | RAM: {stats.memory}"
+        f"{battery_info}\n"
+        f"{paths_info}"
+    )

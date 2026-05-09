@@ -2,6 +2,37 @@
 
 All notable changes to the OpenClawGotchi project will be documented in this file.
 
+## [Unreleased] - 2026-05-09
+
+### Added
+- **External RAG service integration via REST**: opt-in connector to any RAG (Retrieval-Augmented Generation) backend that exposes a small documented HTTP contract (see `src/llm/rag_client.py` module docstring). New `/rag` Telegram command (`/rag`, `/rag <query>`, `/rag --top N <query>`). LLM tools `query_rag(query, top_k)` and `persist_to_rag(text, title, tags)`. Env vars: `RAG_API_URL` (empty disables), `RAG_API_KEY`, `RAG_DEFAULT_COLLECTIONS`.
+- **Bot can also act as a generic MCP client over SSE.** New module `src/llm/rag_mcp_client.py` is a hand-rolled minimal MCP-over-SSE client (~250 LoC) using only the stdlib + `requests` (already in the venv via litellm). Speaks just enough of the MCP spec to do `initialize` + `tools/list` + `tools/call` against any SSE-transport server — no `mcp[cli]` dependency, so the Pi Zero 2W's RAM budget is respected (the official package pulls in `cryptography`, `pydantic-settings`, `starlette`, `uvicorn`, etc.).
+- **Two new LLM tools for MCP**: `mcp_list_tools()` (discover) and `mcp_call_tool(name, arguments)` (invoke). The agent decides which advertised tool to call. Activates only when `RAG_TRANSPORT=mcp` is set in the environment.
+- New env var `RAG_TRANSPORT=rest|mcp` (default `rest`). When `mcp` is selected, `RAG_API_URL` is interpreted as the MCP-SSE base URL (e.g. `http://your-rag-host:8766`).
+- **`/model` Telegram command**: inline-keyboard model picker. Without args it opens buttons for every preset (gemini, glm, ollama). With an argument (`/model glm`) it falls through to the existing `/use` flow. `/use` and `/switch` remain as text aliases.
+- **Live Ollama discovery**: tapping `🦙 ollama ▸` queries the configured Ollama server (`/api/tags` + `/api/show`), filters by `capabilities.tools`, and only lists tool-capable models. Falls back to all installed models with a warning when none advertise tools. Includes `◂ Back` button and a graceful "could not reach server" state. New env vars: `OLLAMA_MODEL` (default `qwen2.5:14b`) and `OLLAMA_API_BASE` (placeholder default `http://ollama-server:11434`).
+- **Persistent model choice**: `/model` and `/use` now write the selection to `data/active_model.json` (gitignored). On startup `LiteLLMConnector` restores it before falling back to `DEFAULT_LITE_PRESET`. Survives `systemctl restart` and reboots.
+- **`/update` Telegram command + `scripts/auto_update.sh`**: owner-only command that fetches `origin/main`, fast-forwards if there are new commits, refreshes venv deps when `requirements.txt` changed, and restarts the systemd service. Supports `/update check` for dry-run. Cron-friendly so the bot can also auto-update unattended.
+- **Update safety net**: before pulling, the script tarballs `gotchi.db` + `data/` + `.env` to `backups/pre-update-<timestamp>-<sha>.tar.gz` (rolling, keeps last 3 — see `OCG_BACKUP_KEEP`). If the service fails to come back up after the new code is in place, the script auto-rolls-back to the previous commit, reinstalls deps if needed, restarts, and exits with code 4 to flag the failed upgrade. Disable with `OCG_NO_BACKUP=1` / `OCG_NO_ROLLBACK=1`.
+- **`gotchi-update` sudoers entry** in `setup.sh`: lets the bot user `systemctl restart gotchi-bot.service` without a password — needed by `/update` and the unattended cron path.
+- **UPS HAT (C) battery monitoring** (Waveshare): new `hardware/battery.py` reads bus voltage, current and power from the on-board INA219 over I2C and reports a 0–100 % estimate based on the 1× 18650 voltage curve (3.0 V empty → 4.2 V full). Auto-detects the sensor and gracefully degrades when I2C is disabled or the HAT is absent — every public function returns `None` rather than raising.
+- **`/battery` Telegram command**: shows the current reading (`🔋 87 % — 4.05 V, +120 mA (charging, 974 mW)`) or a friendly "no UPS HAT detected" hint with `i2cdetect` instructions.
+- **System status line includes battery** (when present): `get_stats_string()` adds a `[BATTERY] …` line, so heartbeat reflections and the bot's self-awareness pick up battery state automatically.
+- **Optional dep `smbus2`** added to `requirements.txt` (pure-Python, ~30 KB). Drop the line to disable battery support entirely.
+
+### Changed
+- **HTTP timeouts** raised via `Application.builder()` (`read=60`, `write=60`, `connect=30`, `pool=30`). Pi Zero 2W's WiFi can otherwise time out polling Telegram while a long Ollama reply is streaming, surfacing as `httpx.ReadError` / `Timed out`.
+
+### Fixed
+- **`BOT_LANGUAGE` was dead code in the system prompt**: defined in `config.py` and exposed via `.env`, but never injected anywhere — heartbeat reflections and the SAY: speech bubble would happily drift into Japanese/Chinese on Qwen-family models because no language was pinned. New `_language_directive()` in `llm/prompts.py` is part of `build_system_context()` and applies to every system prompt path (replies, heartbeat, SAY:). Codes mapped to readable names (`de` → "German (Deutsch)" etc.) for common languages; unknown codes pass through verbatim.
+- **`error_screen()` SAY: text now respects `BOT_LANGUAGE`**: previously hardcoded Japanese (`システムエラー発生` etc.), which renders as garbled glyphs for owners who don't read it. Localized into `ja` / `en` / `de` / `ru` / `es` / `fr`. Default (when `BOT_LANGUAGE` is unset) stays Japanese to preserve the original cyberpunk aesthetic; unknown codes fall back to English.
+- **Onboarding loop never exited**: `BOOTSTRAP.md` was only deleted when the LLM emitted a magic completion phrase ("onboarding complete", "saved to identity.md", …). Models that update `IDENTITY.md` correctly without that phrase left the bootstrap stale forever and re-triggered onboarding on every restart. `needs_onboarding()` now auto-completes when `IDENTITY.md` mtime > `BOOTSTRAP.md` mtime.
+
+### Notes
+- The MCP client uses a sync API throughout — slots into the existing TOOL_MAP dispatcher without async plumbing.
+- A single background thread reads the SSE stream and routes JSON-RPC responses by id; one connected client is reused per process via a lazy singleton.
+- Graceful degradation: when the MCP server is unreachable or `RAG_TRANSPORT` isn't set, the new tools return informative no-op strings; the bot stays alive.
+
 ## [Unreleased] - 2026-04-29
 
 ### Added
