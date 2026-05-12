@@ -17,8 +17,19 @@ def needs_onboarding() -> bool:
     """
     Check if bot needs onboarding (BOOTSTRAP.md exists).
     Also checks templates/ as fallback if workspace is missing.
+    Auto-completes if IDENTITY.md was already filled in by the LLM.
     """
     if BOOTSTRAP_FILE.exists():
+        identity_file = WORKSPACE_DIR / "IDENTITY.md"
+        try:
+            if identity_file.exists() and (
+                identity_file.stat().st_mtime > BOOTSTRAP_FILE.stat().st_mtime
+            ):
+                log.info("Auto-completing onboarding: IDENTITY.md newer than BOOTSTRAP.md")
+                BOOTSTRAP_FILE.unlink()
+                return False
+        except Exception as e:
+            log.warning(f"Onboarding auto-complete check failed: {e}")
         return True
     
     # Fallback: check templates (workspace might not be created yet)
