@@ -103,6 +103,7 @@ coverage.xml
 rate_limits.json
 data/cron_jobs.json
 backups/
+data/active_model.json
 # data/custom_faces.json
 
 # ===================

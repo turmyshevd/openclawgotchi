@@ -1210,7 +1210,12 @@ async def cmd_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
         out = out.strip()[-3500:]
 
         if check_only:
-            status = "🆕 Updates available" if proc.returncode == 0 else "✅ Up-to-date"
+            if proc.returncode == 0:
+                status = "🆕 Updates available"
+            elif proc.returncode == 1:
+                status = "✅ Up-to-date"
+            else:
+                status = f"❌ Update check failed (exit {proc.returncode})"
             await msg.edit_text(f"{status}\n\n```\n{out}\n```", parse_mode="Markdown")
             return
 
