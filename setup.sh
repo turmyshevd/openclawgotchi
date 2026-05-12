@@ -213,7 +213,8 @@ echo "  ✅ Display permissions configured (passwordless sudo)"
 
 # Allow the bot user to restart its own service (used by /update + auto_update.sh)
 UPDATE_SUDOERS_FILE="/etc/sudoers.d/gotchi-update"
-echo "${USER} ALL=(ALL) NOPASSWD: /bin/systemctl restart gotchi-bot.service, /usr/bin/systemctl restart gotchi-bot.service" | sudo tee "$UPDATE_SUDOERS_FILE" > /dev/null
+UPDATE_SERVICE_NAME="${OCG_SERVICE:-gotchi-bot.service}"
+echo "${USER} ALL=(ALL) NOPASSWD: /bin/systemctl restart ${UPDATE_SERVICE_NAME}, /usr/bin/systemctl restart ${UPDATE_SERVICE_NAME}" | sudo tee "$UPDATE_SUDOERS_FILE" > /dev/null
 sudo chmod 0440 "$UPDATE_SUDOERS_FILE"
 echo "  ✅ /update permissions configured (passwordless service restart)"
 

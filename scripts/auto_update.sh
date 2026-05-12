@@ -143,6 +143,11 @@ fi
 log "Rolling back to ${PREVIOUS_HEAD:0:8}…"
 git reset --hard --quiet "${PREVIOUS_HEAD}"
 
+if [ -n "${BACKUP_FILE}" ] && [ -f "${BACKUP_FILE}" ]; then
+    log "Restoring backed up user state…"
+    tar -xzf "${BACKUP_FILE}" -C "${PROJECT_DIR}"
+fi
+
 if [ -n "${REQS_CHANGED}" ] && [ -x "${VENV_PIP}" ]; then
     log "Reinstalling old requirements.txt…"
     "${VENV_PIP}" install --quiet --upgrade -r requirements.txt
