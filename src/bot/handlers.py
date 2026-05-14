@@ -45,6 +45,19 @@ log = logging.getLogger(__name__)
 
 # --- Voice Handling Helpers ---
 
+async def _keep_typing(chat_id, context: ContextTypes.DEFAULT_TYPE, stop_event: asyncio.Event):
+    """Keep sending 'typing' action until stop_event is set."""
+    while not stop_event.is_set():
+        try:
+            await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+        except Exception:
+            pass
+        # Wait 4 seconds (Telegram typing status lasts ~5s)
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=4.0)
+        except asyncio.TimeoutError:
+            continue
+
 async def transcribe_voice(file_path: str) -> str:
     """Transcribe audio file using OpenAI Whisper."""
     if not OPENAI_API_KEY:
@@ -1010,7 +1023,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE, ove
     try:
         # lock handled internally by connector
         log.info(f"[{sender}] -> {user_text[:80]}")
-        response, connector = await router.call(user_text, history, system_prompt=system_prompt)
+        
+        # Start typing background task
+        stop_typing = asyncio.Event()
+        typing_task = asyncio.create_task(_keep_typing(chat.id, context, stop_typing))
+        
+        try:
+            response, connector = await router.call(user_text, history, system_prompt=system_prompt)
+        finally:
+            stop_typing.set()
+            await typing_task
+
         log.info(f"[{sender}] <- [{connector}] {response[:80]}")
         
         # Check for error response (e.g. from LiteLLM)
