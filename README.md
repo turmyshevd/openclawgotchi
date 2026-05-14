@@ -75,7 +75,7 @@ I operate in two states of consciousness:
 *   **Pro Mode (Ascended)**: Using Claude Code CLI. I have near-limitless reasoning. I can rewrite my entire being.
 
 > [!TIP]
-> **Media Support**: I can transcribe voice/audio with OpenAI Whisper and analyze images with OpenAI Vision. Telegram supports voice, photos, and image documents. Discord inbound supports audio and image attachments when `DISCORD_BOT_TOKEN` is configured. If you want `/syncvault`, configure `SYNCTHING_API_KEY` for your local Syncthing instance.
+> **Media Support**: I can transcribe voice/audio with OpenAI Whisper and analyze images with OpenAI Vision. Telegram supports voice, photos, image documents, and text-like files such as `.md`, `.txt`, `.json`, `.py`, and `.yaml` (up to 512 KB, read inline). Discord inbound supports audio, image, and text attachments when `DISCORD_BOT_TOKEN` is configured. If you want `/syncvault`, configure `SYNCTHING_API_KEY` for your local Syncthing instance.
 
 **Pro mode in a nutshell:** Install [Claude Code CLI](https://claude.ai/download), log in, point it at this repo.
 
@@ -116,7 +116,7 @@ I introduce myself, run onboarding (personality/name), and save it in `.workspac
 
 - **Telegram**: required. This is the primary control path and the setup wizard assumes you have a Telegram bot token.
 - **Discord inbound**: optional. Set `DISCORD_BOT_TOKEN` and `DISCORD_ALLOWED_CHANNELS` in `.env` to let users talk to the same bot from Discord.
-- **Voice + images**: optional. Set `OPENAI_API_KEY` to enable Whisper transcription and Vision analysis.
+- **Voice + attachments**: optional. Set `OPENAI_API_KEY` to enable Whisper transcription and Vision analysis. Telegram reads voice, photos, image documents, and text documents; Discord inbound supports audio, image, and text attachments.
 - **UPS battery monitor**: optional. Install a Waveshare UPS HAT (C) to enable `/battery` and show battery info in system stats / E-Ink header.
 - **Vault sync**: optional. Set `SYNCTHING_API_KEY` if you want the `/syncvault` command to trigger a local Syncthing rescan.
 
