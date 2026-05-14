@@ -46,6 +46,18 @@ log = logging.getLogger(__name__)
 
 # --- Voice Handling Helpers ---
 
+async def _keep_typing(chat_id: int, context: ContextTypes.DEFAULT_TYPE, stop_event: asyncio.Event) -> None:
+    """Refresh Telegram typing status until the current response is ready."""
+    while not stop_event.is_set():
+        try:
+            await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+        except Exception:
+            log.debug("Failed to send typing action", exc_info=True)
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=4.0)
+        except asyncio.TimeoutError:
+            continue
+
 async def transcribe_voice(file_path: str) -> str:
     """Transcribe audio file using OpenAI Whisper."""
     if not OPENAI_API_KEY:
@@ -894,6 +906,95 @@ async def handle_image_document(update: Update, context: ContextTypes.DEFAULT_TY
             os.remove(tmp_path)
 
 
+_TEXT_DOCUMENT_SUFFIXES = {
+    ".md", ".txt", ".text", ".log", ".csv", ".json", ".yaml", ".yml",
+    ".py", ".js", ".ts", ".tsx", ".jsx", ".sh", ".toml", ".ini", ".cfg",
+    ".conf", ".xml", ".html", ".css", ".sql",
+}
+_TEXT_DOCUMENT_MIME_PREFIXES = ("text/",)
+_TEXT_DOCUMENT_MIME_TYPES = {
+    "application/json",
+    "application/xml",
+    "application/javascript",
+    "application/x-yaml",
+}
+_MAX_TEXT_DOCUMENT_BYTES = 512 * 1024
+
+
+def _is_text_document(file_name: str, mime_type: str) -> bool:
+    suffix = Path(file_name or "").suffix.lower()
+    mime = (mime_type or "").lower()
+    return (
+        suffix in _TEXT_DOCUMENT_SUFFIXES
+        or mime in _TEXT_DOCUMENT_MIME_TYPES
+        or any(mime.startswith(prefix) for prefix in _TEXT_DOCUMENT_MIME_PREFIXES)
+    )
+
+
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle non-image documents, currently focusing on text-like files."""
+    user = update.effective_user
+    chat = update.effective_chat
+
+    if not is_allowed(user.id, chat.id):
+        if chat.type == "private":
+            await update.message.reply_text("Access denied.")
+        return
+
+    document = update.message.document
+    if not document:
+        return
+
+    file_name = document.file_name or "document"
+    mime_type = document.mime_type or "application/octet-stream"
+
+    if not _is_text_document(file_name, mime_type):
+        await update.message.reply_text(
+            f"I got `{file_name}`, but I currently only read text documents like `.md`, `.txt`, `.json`, `.py`, `.yaml`.",
+            parse_mode="Markdown",
+        )
+        return
+
+    if document.file_size and document.file_size > _MAX_TEXT_DOCUMENT_BYTES:
+        await update.message.reply_text(
+            f"`{file_name}` is too large for inline reading. Limit: {_MAX_TEXT_DOCUMENT_BYTES // 1024} KB.",
+            parse_mode="Markdown",
+        )
+        return
+
+    await chat.send_action(ChatAction.TYPING)
+
+    try:
+        remote_file = await document.get_file()
+        suffix = Path(file_name).suffix or ".txt"
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            await remote_file.download_to_drive(tmp.name)
+            tmp_path = tmp.name
+
+        raw_bytes = Path(tmp_path).read_bytes()
+        text = raw_bytes.decode("utf-8", errors="replace").strip()
+        if not text:
+            await update.message.reply_text(f"`{file_name}` looks empty.", parse_mode="Markdown")
+            return
+
+        if len(text) > 12000:
+            text = text[:12000] + "\n\n[truncated]"
+
+        prefix = f"[User attached file: {file_name}]\n"
+        if update.message.caption:
+            prefix += f"[Caption: {update.message.caption}]\n"
+        prefix += "\n"
+
+        await handle_message(update, context, override_text=prefix + text)
+
+    except Exception as e:
+        log.error(f"Document handling failed: {e}")
+        await update.message.reply_text(f"Error processing document: {e}")
+    finally:
+        if 'tmp_path' in locals() and os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
 # --- Message Handler ---
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE, override_text: str = None):
@@ -901,6 +1002,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE, ove
     user = update.effective_user
     chat = update.effective_chat
     is_group = chat.type in ("group", "supergroup")
+    stop_typing: asyncio.Event | None = None
+    typing_task: asyncio.Task | None = None
     
     if not is_allowed(user.id, chat.id):
         if not is_group:
@@ -963,6 +1066,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE, ove
             return  # Nothing to process
     
     save_user(user.id, user.username or "", user.first_name or "", user.last_name or "")
+
+    # Start typing immediately so pre-LLM steps are also covered.
+    await chat.send_action(ChatAction.TYPING)
+    stop_typing = asyncio.Event()
+    typing_task = asyncio.create_task(_keep_typing(chat.id, context, stop_typing))
     
     # Triage before deciding how to handle the message.
     history = get_history(conv_id)
@@ -977,9 +1085,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE, ove
         # when the user clearly intends to save a note or the classifier is highly confident.
         memo_mode = _should_enable_memo_mode(user_text, classification)
 
-    # Show typing
-    await chat.send_action(ChatAction.TYPING)
-    
     # Check if memory flush needed (use full history length, before optimization)
     flush_prompt = check_and_inject_flush(history)
 
@@ -1117,6 +1222,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE, ove
         from audit_logging.command_logger import log_error
         log_error("unexpected", str(e), {"chat_id": conv_id})
     finally:
+        if stop_typing is not None:
+            stop_typing.set()
+        if typing_task is not None:
+            await typing_task
         litellm_connector.set_cron_target_chat_id(None)
 
 async def cmd_use(update: Update, context: ContextTypes.DEFAULT_TYPE):

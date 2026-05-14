@@ -59,6 +59,9 @@ log = logging.getLogger(__name__)
 
 DISCORD_MSG_LIMIT = 2000
 _AUDIO_SUFFIXES = {".ogg", ".mp3", ".wav", ".m4a", ".webm", ".aac", ".flac"}
+_TEXT_ATTACHMENT_SUFFIXES = {".md", ".txt", ".py", ".json", ".yaml", ".yml", ".js", ".ts", ".tsx", ".jsx", ".toml", ".ini", ".cfg", ".conf", ".csv", ".log", ".sql"}
+_MAX_INLINE_TEXT_ATTACHMENT_BYTES = 512 * 1024
+_MAX_INLINE_TEXT_ATTACHMENT_CHARS = 12000
 
 
 def _discord_conv_id(channel_id: int) -> int:
@@ -95,6 +98,9 @@ def _attachment_kind(attachment) -> str:
         return "image"
     if content_type.startswith("audio/") or suffix in _AUDIO_SUFFIXES:
         return "audio"
+    # Treat other common text-based files as documents.
+    if content_type.startswith("text/") or suffix in _TEXT_ATTACHMENT_SUFFIXES:
+        return "document"
     return ""
 
 
@@ -176,44 +182,44 @@ async def _handle_text_message(message, user_text: str, *, is_dm: bool, should_r
 
     save_user(message.author.id, message.author.name or "", message.author.display_name or "", "")
 
-    history = get_history(conv_id)
-    if history:
-        history = history[:-1]
-
-    onboarding_mode = needs_onboarding()
-    memo_mode = False
-    if not onboarding_mode:
-        classification = await classify_message_for_vault(user_text, history)
-        memo_mode = _should_enable_memo_mode(user_text, classification)
-
-    flush_prompt = check_and_inject_flush(history)
-    history = optimize_history(history)
-
-    if onboarding_mode:
-        user_text = get_bootstrap_prompt() + " [USER]: " + user_text
-    if flush_prompt:
-        user_text = user_text + flush_prompt
-
-    system_prompt: Optional[str] = None
-    if memo_mode:
-        system_prompt = build_system_context(user_text) + "\n---\n" + build_vault_context() + "\n\n"
-        system_prompt += (
-            "## Memo Capture Directive\n"
-            "Treat this Discord message as project knowledge unless it clearly becomes a command or question.\n"
-            "If enough context is available, use vault_write to capture the note in markdown.\n"
-            "If anything essential is unclear, ask one short clarifying question before writing.\n"
-            "After capture, keep the reply brief and mention what was saved.\n"
-        )
-
-    transport_note = (
-        "\n---\n## Discord Transport Note\n"
-        "You are replying in Discord. Keep replies under Discord's message limits. "
-        "Scheduled reminders currently deliver through Telegram/admin fallback, not Discord channels."
-    )
-    system_prompt = (system_prompt or build_system_context(user_text)) + transport_note
-
     try:
         async with message.channel.typing():
+            history = get_history(conv_id)
+            if history:
+                history = history[:-1]
+
+            onboarding_mode = needs_onboarding()
+            memo_mode = False
+            if not onboarding_mode:
+                classification = await classify_message_for_vault(user_text, history)
+                memo_mode = _should_enable_memo_mode(user_text, classification)
+
+            flush_prompt = check_and_inject_flush(history)
+            history = optimize_history(history)
+
+            if onboarding_mode:
+                user_text = get_bootstrap_prompt() + " [USER]: " + user_text
+            if flush_prompt:
+                user_text = user_text + flush_prompt
+
+            system_prompt: Optional[str] = None
+            if memo_mode:
+                system_prompt = build_system_context(user_text) + "\n---\n" + build_vault_context() + "\n\n"
+                system_prompt += (
+                    "## Memo Capture Directive\n"
+                    "Treat this Discord message as project knowledge unless it clearly becomes a command or question.\n"
+                    "If enough context is available, use vault_write to capture the note in markdown.\n"
+                    "If anything essential is unclear, ask one short clarifying question before writing.\n"
+                    "After capture, keep the reply brief and mention what was saved.\n"
+                )
+
+            transport_note = (
+                "\n---\n## Discord Transport Note\n"
+                "You are replying in Discord. Keep replies under Discord's message limits. "
+                "Scheduled reminders currently deliver through Telegram/admin fallback, not Discord channels."
+            )
+            system_prompt = (system_prompt or build_system_context(user_text)) + transport_note
+
             log.info("[discord %s] -> %s", sender, user_text[:80])
             response, connector = await get_router().call(user_text, history, system_prompt=system_prompt)
             log.info("[discord %s] <- [%s] %s", sender, connector, response[:80])
@@ -341,6 +347,35 @@ def start_discord_bot_background() -> Optional[threading.Thread]:
                         await _send_long(message, transcript)
                     continue
                 audio_parts.append(transcript)
+            elif kind == "document":
+                tmp_path = ""
+                try:
+                    if attachment.size and attachment.size > _MAX_INLINE_TEXT_ATTACHMENT_BYTES:
+                        if should_respond:
+                            await _send_long(
+                                message,
+                                f"Text attachment too large for inline reading. Limit: {_MAX_INLINE_TEXT_ATTACHMENT_BYTES // 1024} KB.",
+                            )
+                        continue
+                    tmp_path = await _download_attachment(attachment)
+                    content = ""
+                    try:
+                        with open(tmp_path, "r", encoding="utf-8", errors="ignore") as f:
+                            content = f.read()
+                    except Exception as e:
+                        log.warning("Could not read Discord attachment %s as text: %s", attachment.filename, e)
+                        continue
+                    
+                    if content:
+                        filename = getattr(attachment, "filename", "document")
+                        if len(content) > _MAX_INLINE_TEXT_ATTACHMENT_CHARS:
+                            content = content[:_MAX_INLINE_TEXT_ATTACHMENT_CHARS] + "\n\n[truncated]"
+                        user_text = (user_text + "\n\n" if user_text else "") + f"[DOCUMENT ATTACHED: {filename}]\n\nFILE CONTENT:\n---\n{content}\n---\n"
+                        if should_respond:
+                            await message.reply(f"📄 *Received file:* `{filename}`", mention_author=False)
+                finally:
+                    if tmp_path and os.path.exists(tmp_path):
+                        os.remove(tmp_path)
 
         if audio_parts:
             user_text = (user_text + "\n\n" if user_text else "") + "\n".join(

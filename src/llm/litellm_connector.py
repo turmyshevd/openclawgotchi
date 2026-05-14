@@ -3,6 +3,7 @@ LiteLLM connector — full-featured fallback with tools.
 """
 
 import contextvars
+import functools
 import json
 import logging
 import shlex
@@ -1434,7 +1435,7 @@ class LiteLLMConnector(LLMConnector):
                         func = TOOL_MAP.get(func_name)
                         if func:
                             try:
-                                result = func(**args)
+                                result = await asyncio.to_thread(functools.partial(func, **args))
                             except TypeError as e:
                                 # Wrong arguments
                                 result = f"Error: Invalid arguments for {func_name}: {e}"
@@ -1484,7 +1485,6 @@ class LiteLLMConnector(LLMConnector):
                     # Auto-retry if short limit (< 90s)
                     wait = should_auto_retry("litellm")
                     if wait and wait <= 90 and turn == 0:
-                        import asyncio
                         log.info(f"[LiteLLM] Short rate limit, auto-retrying in {wait:.0f}s...")
                         await asyncio.sleep(wait + 1)
                         continue  # Retry the same turn

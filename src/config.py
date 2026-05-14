@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 from typing import Optional
 
+from dotenv import load_dotenv
+
 # --- Paths ---
 PROJECT_DIR = Path(__file__).parent.parent.resolve()
 SRC_DIR = PROJECT_DIR / "src"
@@ -14,6 +16,9 @@ DB_PATH = PROJECT_DIR / "gotchi.db"
 UI_SCRIPT = SRC_DIR / "ui" / "gotchi_ui.py"
 DATA_DIR = PROJECT_DIR / "data"
 CUSTOM_FACES_PATH = DATA_DIR / "custom_faces.json"
+
+# Load local .env for direct runs outside systemd. override=True keeps parity with Pi service fixes.
+load_dotenv(PROJECT_DIR / ".env", override=True)
 
 def _env_flag(name: str, default: bool = False) -> bool:
     """Parse boolean env var safely."""

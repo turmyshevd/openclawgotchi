@@ -31,7 +31,8 @@ from hardware.display import boot_screen, online_screen, show_face
 from bot.handlers import (
     cmd_start, cmd_clear, cmd_context, cmd_status, cmd_xp, cmd_pro, cmd_use,
     cmd_remember, cmd_recall, cmd_vault, cmd_cron, cmd_jobs, cmd_memory, cmd_health, cmd_battery,
-    cmd_sync, cmd_model, cb_model, cmd_update, handle_message, handle_voice, handle_photo, handle_image_document
+    cmd_sync, cmd_model, cb_model, cmd_update, handle_message, handle_voice, handle_photo, handle_image_document,
+    handle_document
 )
 
 from bot.heartbeat import send_heartbeat
@@ -291,6 +292,7 @@ def main():
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.Document.IMAGE, handle_image_document))
+    app.add_handler(MessageHandler(filters.Document.ALL & (~filters.Document.IMAGE), handle_document))
 
     # Schedule heartbeat
 
