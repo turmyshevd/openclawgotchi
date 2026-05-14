@@ -2,6 +2,7 @@
 LiteLLM connector — full-featured fallback with tools.
 """
 
+import asyncio
 import contextvars
 import functools
 import json
