@@ -890,6 +890,65 @@ async def handle_image_document(update: Update, context: ContextTypes.DEFAULT_TY
             os.remove(tmp_path)
 
 
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle generic documents (text, md, py, etc.). Reads content and passes to handle_message."""
+    user = update.effective_user
+    chat = update.effective_chat
+
+    if not is_allowed(user.id, chat.id):
+        if chat.type == "private":
+            await update.message.reply_text("Access denied.")
+        return
+
+    document = update.message.document
+    if not document:
+        return
+
+    # Skip if it's an image (handled by handle_image_document)
+    if (document.mime_type or "").startswith("image/"):
+        return
+
+    # Show typing
+    await chat.send_action(ChatAction.TYPING)
+
+    try:
+        file = await context.bot.get_file(document.file_id)
+        
+        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+            await file.download_to_drive(tmp.name)
+            tmp_path = tmp.name
+        
+        # Try to read as text
+        content = ""
+        try:
+            with open(tmp_path, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+        except Exception as e:
+            await update.message.reply_text(f"Could not read file as text: {e}")
+            return
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+        if not content:
+            await update.message.reply_text("The file appears to be empty.")
+            return
+
+        filename = document.file_name or "document"
+        caption = update.message.caption or ""
+        
+        combined_text = f"[DOCUMENT ATTACHED: {filename}]\n\nFILE CONTENT:\n---\n{content}\n---\n\n{caption}"
+        
+        await update.message.reply_text(f"📄 *Received file:* `{filename}`", parse_mode="Markdown")
+        
+        # Pass to handle_message
+        await handle_message(update, context, override_text=combined_text)
+
+    except Exception as e:
+        log.error(f"Document handling failed: {e}")
+        await update.message.reply_text(f"Error processing document: {e}")
+
+
 # --- Message Handler ---
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE, override_text: str = None):

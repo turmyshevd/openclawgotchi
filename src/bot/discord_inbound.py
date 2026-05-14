@@ -95,6 +95,9 @@ def _attachment_kind(attachment) -> str:
         return "image"
     if content_type.startswith("audio/") or suffix in _AUDIO_SUFFIXES:
         return "audio"
+    # Treat other common text-based files as documents
+    if content_type.startswith("text/") or suffix in {".md", ".txt", ".py", ".json", ".yaml", ".yml", ".js", ".ts"}:
+        return "document"
     return ""
 
 
@@ -341,6 +344,26 @@ def start_discord_bot_background() -> Optional[threading.Thread]:
                         await _send_long(message, transcript)
                     continue
                 audio_parts.append(transcript)
+            elif kind == "document":
+                tmp_path = ""
+                try:
+                    tmp_path = await _download_attachment(attachment)
+                    content = ""
+                    try:
+                        with open(tmp_path, "r", encoding="utf-8", errors="ignore") as f:
+                            content = f.read()
+                    except Exception as e:
+                        log.warning("Could not read Discord attachment %s as text: %s", attachment.filename, e)
+                        continue
+                    
+                    if content:
+                        filename = getattr(attachment, "filename", "document")
+                        user_text = (user_text + "\n\n" if user_text else "") + f"[DOCUMENT ATTACHED: {filename}]\n\nFILE CONTENT:\n---\n{content}\n---\n"
+                        if should_respond:
+                            await message.reply(f"📄 *Received file:* `{filename}`", mention_author=False)
+                finally:
+                    if tmp_path and os.path.exists(tmp_path):
+                        os.remove(tmp_path)
 
         if audio_parts:
             user_text = (user_text + "\n\n" if user_text else "") + "\n".join(
