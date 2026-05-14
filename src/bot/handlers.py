@@ -962,7 +962,9 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    await chat.send_action(ChatAction.TYPING)
+    # Start typing immediately so user knows we're downloading
+    stop_typing = asyncio.Event()
+    typing_task = asyncio.create_task(_keep_typing(chat.id, context, stop_typing))
 
     try:
         remote_file = await document.get_file()
@@ -973,6 +975,11 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         raw_bytes = Path(tmp_path).read_bytes()
         text = raw_bytes.decode("utf-8", errors="replace").strip()
+
+        # Stop typing before calling handle_message, as handle_message starts its own typing task
+        stop_typing.set()
+        await typing_task
+
         if not text:
             await update.message.reply_text(f"`{file_name}` looks empty.", parse_mode="Markdown")
             return
@@ -989,8 +996,10 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
         log.error(f"Document handling failed: {e}")
+        stop_typing.set()
         await update.message.reply_text(f"Error processing document: {e}")
     finally:
+        stop_typing.set()
         if 'tmp_path' in locals() and os.path.exists(tmp_path):
             os.remove(tmp_path)
 

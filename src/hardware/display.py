@@ -112,9 +112,21 @@ def update_display(mood: str = None, text: str = None, full_refresh: bool = Fals
             "BOT_NAME", "OWNER_NAME", "BOT_LANGUAGE",
         )
     }
-    cmd = ["sudo", "/usr/bin/env"]
+    # Always include at least one var to satisfy the '*' in sudoers rule: /usr/bin/env * /home/...
+    propagate_env["OCG_SUDO_MATCH"] = "1"
+
+    # Ensure absolute paths for sudo and env to match sudoers exactly.
+    # setup.sh writes sudoers with the install directory, so derive the same
+    # command paths from PROJECT_DIR instead of pinning one host-specific path.
+    SUDO_BIN = "/usr/bin/sudo"
+    ENV_BIN = "/usr/bin/env"
+    PYTHON_BIN = str(PROJECT_DIR / "venv/bin/python3")
+    UI_SCRIPT_ABS = str(UI_SCRIPT)
+
+    cmd = [SUDO_BIN, "-n", ENV_BIN]
     cmd.extend(f"{k}={v}" for k, v in propagate_env.items())
-    cmd.extend([str(PROJECT_DIR / "venv/bin/python3"), str(UI_SCRIPT)])
+    cmd.extend([PYTHON_BIN, UI_SCRIPT_ABS])
+
     if mood:
         cmd.extend(["--mood", mood])
     if text:
@@ -123,6 +135,7 @@ def update_display(mood: str = None, text: str = None, full_refresh: bool = Fals
         cmd.append("--full")
 
     try:
+        log.debug(f"Executing display cmd: {' '.join(cmd)}")
         thread = threading.Thread(target=_run_display_update, args=(cmd,), daemon=True)
         thread.start()
         log.info(f"Display update: mood={mood}, text={text}")

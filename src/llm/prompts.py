@@ -28,10 +28,10 @@ def _language_directive() -> str:
     name = _LANG_NAMES.get(code, code)
     return (
         f"\n---\n## Language\n"
-        f"ALWAYS respond in **{name}** by default — including the SAY: speech bubble "
-        f"and any autonomous output (heartbeat, reflections, status). "
-        f"Only switch language if the user clearly writes to you in another language; "
-        f"in that case, mirror their language. Never use a third language."
+        f"ALWAYS respond in **{name}** — including the SAY: speech bubble, "
+        f"chat replies, and any autonomous output (heartbeat, reflections, status). "
+        f"Even if the user writes to you in another language, you MUST respond in **{name}**. "
+        f"This consistency is critical for the system's identity and knowledge base."
     )
 
 

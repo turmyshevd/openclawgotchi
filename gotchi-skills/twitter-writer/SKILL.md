@@ -96,7 +96,7 @@ Before finalizing, remove:
 - fake breadth like “whether you’re X or Y”
 - bloated setup before the point
 
-## If The User Gives Context
+## If the User Gives Context
 
 If the user provides notes, links, rough ideas, screenshots, or bullets:
 
@@ -105,7 +105,16 @@ If the user provides notes, links, rough ideas, screenshots, or bullets:
 - keep the strongest detail
 - write as if the user could post it immediately
 
-## If The User Asks For A Thread
+## Approved Draft Tracking (Gold Standard)
+
+When the user approves a tweet or thread draft:
+
+1. **Save to Vault:** Use `vault_write` to create a new note in `knowledge/notes/twitter-drafts-*.md`.
+2. **Template:** Use the Gold Standard template with `note_type: "asset"` and `status: "evergreen"` for approved drafts.
+3. **Continuity:** Before starting a new writing task, always check `vault_search` for previous approved drafts to maintain style and context.
+4. **Style Guide:** Raw technical honesty, no corporate polish, price transparency.
+
+## If the User Asks for a Thread
 
 - still provide 3 variants unless they ask for one
 - each variant can be a short thread

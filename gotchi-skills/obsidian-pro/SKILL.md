@@ -1,11 +1,11 @@
 ---
 name: obsidian-pro
-description: Advanced Obsidian knowledge management using callouts, properties, and wikilinks. Inspired by kepano/obsidian-skills.
+description: Advanced Obsidian knowledge management using callouts, properties, and wikilinks. Aligned with the Gold Standard.
 metadata:
   {
-    "version": "1.0.0",
-    "author": "kepano & openclawgotchi",
-    "capabilities": ["callouts", "properties", "wikilinks", "canvas"],
+    "version": "1.1.0",
+    "author": "openclawgotchi",
+    "capabilities": ["callouts", "properties", "wikilinks", "canvas", "hierarchical-tags"],
     "openclaw": {
       "emoji": "💎",
       "always": false
@@ -13,82 +13,60 @@ metadata:
   }
 ---
 
-# Obsidian Pro Guide
+# Obsidian Pro Guide (Gold Standard Edition)
 
-Use these rules to make notes "Obsidian-native", visual, and interconnected.
-
-Use this skill together with the vault tools:
-
-- `vault_write(path, content)` to create or update markdown notes and `.canvas` files
-- `vault_read(path)` to inspect an existing note before editing it
-- `vault_list(path)` to explore folders such as `projects/`, `topics/`, and `mocs/`
-- `vault_search(query)` to find related notes, duplicates, and backlink targets
-
-Before creating a new note, search the vault first so you link into what already exists.
+Use these rules to make notes "Obsidian-native", structured, and part of a high-quality knowledge base.
 
 ## 1. Visual Structure (Callouts)
 
-Don't just write text. Use callouts for semantic meaning:
+Semantic formatting is mandatory. Always use Obsidian Callouts:
 
-- `> [!abstract] Summary`: For the executive summary or TL;DR.
-- `> [!quote] Raw Input`: For the original message or data source.
-- `> [!info] Details`: For additional context or technical specs.
-- `> [!todo] Actions`: For follow-up tasks.
-- `> [!danger] Warning`: For critical errors or blockers.
+- `> [!abstract] Abstract`: Brief TL;DR or summary of the note.
+- `> [!quote] Raw`: **Mandatory.** Full original text from the user message. Do not truncate.
+- `> [!info] Details`: For additional context, metrics, or technical specs.
+- `> [!todo] Actions`: Detected tasks or next steps.
 
-## 2. Note Properties (YAML)
+## 2. Note Properties (Gold Standard Frontmatter)
 
-Every new markdown note should start with a YAML block. Use these standard keys:
+Every note MUST start with this exact YAML block. Metadata is critical for Dataview and organization.
 
 ```yaml
 ---
-id: YYYY-MM-DD-HHMMSS
-type: vault-note
-created: YYYY-MM-DDTHH:MM:SS
-project: "Project Name"
-topic: "Topic Name"
-status: "inbox | seedling | evergreen"
+id: "YYYY-MM-DD-HHMMSS"
+type: "vault-note"
+note_type: "memo"       # memo, research, plan, asset, issue, insight
+created: "YYYY-MM-DDTHH:MM:SS"
+source: "telegram"      # telegram, discord, system
+project: "project-slug"
+topic: "sub-topic"
+status: "seedling"      # seedling (draft), budding (developing), evergreen (ready)
 tags:
-  - tag1
-  - tag2
+  - "type/memo"         # Hierarchical: type/*
+  - "area/product"      # Hierarchical: area/*
+  - "status/seedling"    # Hierarchical: status/* (must match status field)
 ---
 ```
 
-Keep `id` stable after creation. Prefer ISO timestamps for `created`.
+## 3. Interconnection & Layout
 
-## 3. Interconnection (Wikilinks)
+- **Wikilinks:** Connect everything. Use `[[Project Hub Name]]` or `[[Topic Name]]`.
+- **Linking Rule:** Always link back to the Project Hub (`[[projects/project-slug]]`) and relevant Area (`[[topics/sub-topic]]`).
+- **Folders:**
+    - `notes/`: Main storage for atomic notes.
+    - `projects/`: Hub pages for specific projects (e.g., `bitdive.md`).
+    - `topics/`: Index pages for broad areas (e.g., `product.md`).
+    - `attachments/`: For images and files.
 
-- Use `[[Note Name]]` to link to other notes.
-- If referencing a project, use `[[projects/Project Name|Project Name]]`.
-- If referencing a topic, use `[[topics/Topic Name|Topic Name]]`.
-- Always try to link the current note to at least one "Map of Content" (MOC) or existing index.
+## 4. Cleaning & Refactoring
 
-Suggested vault layout:
+- **Hierarchical Tags:** Never use flat tags like `#memo`. Always use `#type/memo` or `#area/marketing`.
+- **Status Sync:** Always ensure `#status/*` tag matches the `status` field.
+- **Stability:** Keep IDs and filenames stable. If renaming, update all backlinks.
+- **No Duplicates:** Check `vault_search` before creating. Extend existing notes if they cover the same core thought.
 
-- `projects/<Project Name>.md`
-- `topics/<Topic Name>.md`
-- `mocs/<Area Name> MOC.md`
-- `inbox/<YYYY-MM-DD Note Title>.md`
+## 5. Tools
 
-## 4. Canvas Generation
-
-When asked to "map out" or "visualize" connections, generate an `.canvas` file (JSON).
-Structure nodes with `x`, `y`, `width`, `height`.
-
-Example Node:
-```json
-{
-  "id": "node1",
-  "type": "text",
-  "text": "# Concept",
-  "x": 0, "y": 0, "width": 200, "height": 100
-}
-```
-
-Write canvas files with `vault_write("maps/<name>.canvas", "<json>")`.
-
-## 5. Cleaning and Refactoring
-
-- Use `vault_search` to find orphans or duplicates.
-- When renaming notes, ensure you update all `[[wikilinks]]` in the vault.
-- Do not create duplicate notes when a topic already exists; extend and relink instead.
+- `vault_write(path, content)`: Use the Gold Standard template above.
+- `vault_read(path)`: Check existing content before any edit.
+- `vault_list(path)`: Map out the structure.
+- `vault_search(query)`: Find link targets and prevent duplicates.
