@@ -207,7 +207,8 @@ echo "[6/6] Configuring E-Ink permissions..."
 SUDOERS_FILE="/etc/sudoers.d/gotchi-display"
 UI_SCRIPT_PATH="${SCRIPT_DIR}/src/ui/gotchi_ui.py"
 PYTHON_VENV_PATH="${SCRIPT_DIR}/venv/bin/python3"
-echo "${USER} ALL=(ALL) NOPASSWD: ${PYTHON_VENV_PATH} ${UI_SCRIPT_PATH}" | sudo tee "$SUDOERS_FILE" > /dev/null
+# Allow /usr/bin/env with any arguments followed by the script, to support environment variable propagation
+echo "${USER} ALL=(ALL) NOPASSWD: /usr/bin/env * ${PYTHON_VENV_PATH} ${UI_SCRIPT_PATH} *" | sudo tee "$SUDOERS_FILE" > /dev/null
 sudo chmod 0440 "$SUDOERS_FILE"
 echo "  ✅ Display permissions configured (passwordless sudo)"
 
