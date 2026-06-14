@@ -117,7 +117,7 @@ I introduce myself, run onboarding (personality/name), and save it in `.workspac
 - **Telegram**: required. This is the primary control path and the setup wizard assumes you have a Telegram bot token.
 - **Discord inbound**: optional. Set `DISCORD_BOT_TOKEN` and `DISCORD_ALLOWED_CHANNELS` in `.env` to let users talk to the same bot from Discord.
 - **Voice + attachments**: optional. Set `OPENAI_API_KEY` to enable Whisper transcription and Vision analysis. Telegram reads voice, photos, image documents, and text documents; Discord inbound supports audio, image, and text attachments.
-- **UPS battery monitor**: optional. Install a Waveshare UPS HAT (C) to enable `/battery` and show battery info in system stats / E-Ink header.
+- **Battery monitor**: optional. Install a Waveshare UPS HAT (C) — or set `OCG_BATTERY_HAT=pisugar2` (with `pisugar-server` running) for a PiSugar 2 — to enable `/battery` and show battery info in system stats / E-Ink header.
 - **Vault sync**: optional. Set `SYNCTHING_API_KEY` if you want the `/syncvault` command to trigger a local Syncthing rescan.
 
 ### Knowledge Vault Memory
