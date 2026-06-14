@@ -191,7 +191,9 @@ def _pisugar2_available() -> bool:
 
 
 def _read_pisugar2() -> Optional[BatteryReading]:
-    data = _pisugar_query(["battery", "battery_v", "battery_i", "battery_charging"])
+    data = _pisugar_query(
+        ["battery", "battery_v", "battery_i", "battery_charging", "battery_power_plugged"]
+    )
     if not data or "battery" not in data:
         return None
     try:
@@ -199,8 +201,11 @@ def _read_pisugar2() -> Optional[BatteryReading]:
         voltage_v = float(data.get("battery_v", 0.0))
         # battery_i is amps (PiSugar2-only); tolerate absence.
         current_ma = float(data.get("battery_i", 0.0)) * 1000.0
-        # Trust the server's charging flag — battery_i sign is unreliable here.
-        charging = data.get("battery_charging", "false").lower() == "true"
+        # battery_charging is a noisy voltage-trend heuristic (flaps near full charge),
+        # so prefer battery_power_plugged ("on AC power") when the firmware reports it;
+        # fall back to the charging flag for older firmware that lacks it.
+        plugged = data.get("battery_power_plugged", "").lower() == "true"
+        charging = plugged or data.get("battery_charging", "false").lower() == "true"
         power_mw = abs(voltage_v * current_ma)
         return BatteryReading(
             voltage_v=voltage_v,
