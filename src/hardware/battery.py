@@ -18,12 +18,18 @@ log = logging.getLogger(__name__)
 
 # Backend selection (read inline, matching the OCG_UPS_* convention below).
 BATTERY_HAT = os.environ.get("OCG_BATTERY_HAT", "waveshare").strip().lower()
+if BATTERY_HAT not in ("waveshare", "pisugar2"):
+    log.warning("Unknown OCG_BATTERY_HAT=%r; falling back to Waveshare", BATTERY_HAT)
 
 UPS_I2C_ADDR = int(os.environ.get("OCG_UPS_ADDR", "0x43"), 0)
 UPS_I2C_BUS = int(os.environ.get("OCG_UPS_BUS", "1"))
 
 PISUGAR_HOST = os.environ.get("OCG_PISUGAR_HOST", "127.0.0.1")
-PISUGAR_PORT = int(os.environ.get("OCG_PISUGAR_PORT", "8423"))
+try:
+    PISUGAR_PORT = int(os.environ.get("OCG_PISUGAR_PORT", "8423"))
+except ValueError:
+    log.warning("Invalid OCG_PISUGAR_PORT; using default 8423")
+    PISUGAR_PORT = 8423
 
 _REG_CONFIG = 0x00
 _REG_BUSVOLTAGE = 0x02
@@ -206,10 +212,12 @@ def _read_pisugar2() -> Optional[BatteryReading]:
         # battery_i is amps (PiSugar2-only); tolerate absence.
         current_ma = float(data.get("battery_i", 0.0)) * 1000.0
         # battery_charging is a noisy voltage-trend heuristic (flaps near full charge),
-        # so prefer battery_power_plugged ("on AC power") when the firmware reports it;
-        # fall back to the charging flag for older firmware that lacks it.
-        plugged = data.get("battery_power_plugged", "").lower() == "true"
-        charging = plugged or data.get("battery_charging", "false").lower() == "true"
+        # so treat battery_power_plugged ("on AC power") as authoritative when the
+        # firmware reports it; fall back to the charging flag only when it's absent.
+        if "battery_power_plugged" in data:
+            charging = data["battery_power_plugged"].lower() == "true"
+        else:
+            charging = data.get("battery_charging", "false").lower() == "true"
         power_mw = abs(voltage_v * current_ma)
         return BatteryReading(
             voltage_v=voltage_v,
