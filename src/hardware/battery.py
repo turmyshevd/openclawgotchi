@@ -1,7 +1,9 @@
 """
-UPS HAT (C) battery reader via INA219 over I2C.
+Battery reader. Supports two HATs, selected by OCG_BATTERY_HAT:
+  - "waveshare" (default): UPS HAT (C) via INA219 over I2C.
+  - "pisugar2": PiSugar 2 via the pisugar-server TCP socket.
 
-This is optional hardware support. If the UPS HAT or I2C bus is absent,
+This is optional hardware support. If the HAT, I2C bus, or socket is absent,
 all public functions degrade to None/False without raising.
 """
 
@@ -14,8 +16,20 @@ from typing import Optional
 
 log = logging.getLogger(__name__)
 
+# Backend selection (read inline, matching the OCG_UPS_* convention below).
+BATTERY_HAT = os.environ.get("OCG_BATTERY_HAT", "waveshare").strip().lower()
+if BATTERY_HAT not in ("waveshare", "pisugar2"):
+    log.warning("Unknown OCG_BATTERY_HAT=%r; falling back to Waveshare", BATTERY_HAT)
+
 UPS_I2C_ADDR = int(os.environ.get("OCG_UPS_ADDR", "0x43"), 0)
 UPS_I2C_BUS = int(os.environ.get("OCG_UPS_BUS", "1"))
+
+PISUGAR_HOST = os.environ.get("OCG_PISUGAR_HOST", "127.0.0.1")
+try:
+    PISUGAR_PORT = int(os.environ.get("OCG_PISUGAR_PORT", "8423"))
+except ValueError:
+    log.warning("Invalid OCG_PISUGAR_PORT; using default 8423")
+    PISUGAR_PORT = 8423
 
 _REG_CONFIG = 0x00
 _REG_BUSVOLTAGE = 0x02
@@ -91,7 +105,8 @@ def _percentage_from_voltage(volts: float) -> int:
     return max(0, min(100, int(round(pct))))
 
 
-def is_available() -> bool:
+def _waveshare_available() -> bool:
+    """Return True if the Waveshare UPS HAT (INA219) responds on I2C."""
     bus = _open_bus()
     if bus is None:
         return False
@@ -107,7 +122,8 @@ def is_available() -> bool:
             pass
 
 
-def read() -> Optional[BatteryReading]:
+def _read_waveshare() -> Optional[BatteryReading]:
+    """Read the Waveshare UPS HAT via INA219 over I2C, or None if unavailable."""
     bus = _open_bus()
     if bus is None:
         return None
@@ -143,3 +159,90 @@ def read() -> Optional[BatteryReading]:
             bus.close()
         except Exception:
             pass
+
+
+# --- PiSugar 2 backend (pisugar-server TCP socket) ---
+
+def _pisugar_query(fields: list[str]) -> Optional[dict]:
+    """
+    Query pisugar-server over TCP. Sends `get <field>` for each field on one
+    connection and parses the `key: value` responses. Returns {field: value}
+    strings, or None on any socket/parse failure (silent degradation).
+    """
+    import socket
+
+    try:
+        with socket.create_connection((PISUGAR_HOST, PISUGAR_PORT), timeout=2) as sock:
+            sock.settimeout(2)
+            sock.sendall("".join(f"get {f}\n" for f in fields).encode())
+
+            buf = b""
+            result: dict = {}
+            while len(result) < len(fields):
+                chunk = sock.recv(1024)
+                if not chunk:
+                    break
+                buf += chunk
+                while b"\n" in buf:
+                    line, buf = buf.split(b"\n", 1)
+                    key, sep, value = line.decode(errors="replace").strip().partition(": ")
+                    if sep:
+                        result[key] = value
+            return result or None
+    except (OSError, ValueError) as e:
+        log.debug("PiSugar query failed: %s", e)
+        return None
+
+
+def _pisugar2_available() -> bool:
+    """Return True if pisugar-server answers a battery query over the socket."""
+    return _pisugar_query(["battery"]) is not None
+
+
+def _read_pisugar2() -> Optional[BatteryReading]:
+    """Read PiSugar 2 battery state via pisugar-server, or None if unavailable."""
+    data = _pisugar_query(
+        ["battery", "battery_v", "battery_i", "battery_charging", "battery_power_plugged"]
+    )
+    if not data or "battery" not in data:
+        return None
+    try:
+        percentage = int(round(float(data["battery"])))
+        voltage_v = float(data.get("battery_v", 0.0))
+        # battery_i is amps (PiSugar2-only); tolerate absence.
+        current_ma = float(data.get("battery_i", 0.0)) * 1000.0
+        # battery_charging is a noisy voltage-trend heuristic (flaps near full charge),
+        # so treat battery_power_plugged ("on AC power") as authoritative when the
+        # firmware reports it; fall back to the charging flag only when it's absent.
+        if "battery_power_plugged" in data:
+            charging = data["battery_power_plugged"].lower() == "true"
+        else:
+            charging = data.get("battery_charging", "false").lower() == "true"
+        power_mw = abs(voltage_v * current_ma)
+        return BatteryReading(
+            voltage_v=voltage_v,
+            current_ma=current_ma,
+            power_mw=power_mw,
+            percentage=max(0, min(100, percentage)),
+            charging=charging,
+            raw=dict(data),
+        )
+    except (ValueError, KeyError) as e:
+        log.warning("PiSugar parse failed: %s", e)
+        return None
+
+
+# --- Public API (dispatches on configured backend) ---
+
+def is_available() -> bool:
+    """Return True if the configured battery HAT is present and responding."""
+    if BATTERY_HAT == "pisugar2":
+        return _pisugar2_available()
+    return _waveshare_available()
+
+
+def read() -> Optional[BatteryReading]:
+    """Read a BatteryReading from the configured backend, or None if unavailable."""
+    if BATTERY_HAT == "pisugar2":
+        return _read_pisugar2()
+    return _read_waveshare()

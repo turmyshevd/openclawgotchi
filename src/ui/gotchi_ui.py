@@ -350,8 +350,7 @@ def render_ui(mood="happy", status_text="", fast_mode=True):
         # Footer layout: status (left) | battery (centre) | XP (right).
         # The battery cell lives in the footer rather than the header so the
         # bot name on the top-left has room and the panel can show all three
-        # at once. On the B variant we render the battery suffix into the
-        # red layer when battery_low — otherwise normal black ink.
+        # at once.
         draw.text((4, HEIGHT - FOOTER_H + 1), status_text[:30], font=font_ui, fill=0)
 
         xp_w = 0
@@ -365,13 +364,7 @@ def render_ui(mood="happy", status_text="", fast_mode=True):
             bat_w = bbox_bat[2] - bbox_bat[0]
             bat_x = (WIDTH - bat_w) // 2
             bat_y = HEIGHT - FOOTER_H + 1
-            if red_draw is not None and battery_low:
-                # Render battery in the red layer only — appears red on the
-                # B panel, signalling low charge as an accent (never a
-                # background).
-                red_draw.text((bat_x, bat_y), battery_text, font=font_ui, fill=0)
-            else:
-                draw.text((bat_x, bat_y), battery_text, font=font_ui, fill=0)
+            draw.text((bat_x, bat_y), battery_text, font=font_ui, fill=0)
 
         # 4. Main Content (Face + Bubble)
         
